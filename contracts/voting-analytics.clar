@@ -1,4 +1,4 @@
-;; title: oluolavotes
+;; title: voting-analytics
 ;; version:
 ;; summary:
 ;; description:

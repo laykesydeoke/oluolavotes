@@ -1,23 +1,55 @@
 [project]
-name = "oluolavotes"
+name = 'oluolavotes'
+description = ''
 authors = []
-description = ""
 telemetry = true
+cache_dir = '/home/runner/oluolavotes/oluolavotes/./.requirements'
 requirements = []
-cache_dir = "/home/runner/oluolavotes/oluolavotes/./.requirements"
-boot_contracts = ["pox", "costs-v2", "bns"]
+[contracts.access-control]
+path = 'contracts/access-control.clar'
+clarity_version = 4
+epoch = 'latest'
+
 [contracts.oluolavotes]
-path = "contracts/oluolavotes.clar"
+path = 'contracts/oluolavotes.clar'
+clarity_version = 4
+epoch = 'latest'
 
-[repl]
-costs_version = 2
-parser_version = 2
+[contracts.proposal-execution]
+path = 'contracts/proposal-execution.clar'
+clarity_version = 4
+epoch = 'latest'
 
+[contracts.vote-delegation]
+path = 'contracts/vote-delegation.clar'
+clarity_version = 4
+epoch = 'latest'
+
+[contracts.voting-analytics]
+path = 'contracts/voting-analytics.clar'
+clarity_version = 4
+epoch = 'latest'
+
+[contracts.voting-strategy]
+path = 'contracts/voting-strategy.clar'
+clarity_version = 4
+epoch = 'latest'
+
+[contracts.voting-token]
+path = 'contracts/voting-token.clar'
+clarity_version = 4
+epoch = 'latest'
 [repl.analysis]
-passes = ["check_checker"]
+passes = ['check_checker']
+
+[repl.analysis.lints]
 
 [repl.analysis.check_checker]
 strict = false
 trusted_sender = false
 trusted_caller = false
 callee_filter = false
+
+[repl.remote_data]
+enabled = false
+api_url = 'https://api.hiro.so'

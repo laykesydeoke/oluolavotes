@@ -1,4 +1,4 @@
-;; title: oluolavotes
+;; title: vote-delegation
 ;; version:
 ;; summary:
 ;; description:

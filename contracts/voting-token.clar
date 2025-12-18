@@ -1,4 +1,4 @@
-;; title: oluolavotes
+;; title: voting-token
 ;; version:
 ;; summary:
 ;; description:

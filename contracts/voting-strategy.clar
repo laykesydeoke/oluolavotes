@@ -1,4 +1,4 @@
-;; title: oluolavotes
+;; title: voting-strategy
 ;; version:
 ;; summary:
 ;; description:
