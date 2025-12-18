@@ -1,13 +1,13 @@
-;; Decentralized Voting System
-;; This contract implements a basic decentralized voting system where users can create proposals and vote on them.
+;; Decentralized Voting System - Clarity 4
+;; This contract implements a decentralized voting system with time-based voting periods
 
 ;; Constants
 
 ;; The principal who deployed the contract and has administrative privileges
 (define-constant CONTRACT-OWNER tx-sender)
 
-;; The duration of the voting period in blocks
-(define-constant VOTING-PERIOD u1000)
+;; The duration of the voting period in seconds (Clarity 4: ~7 days)
+(define-constant VOTING-PERIOD u604800)
 
 ;; Error codes
 (define-constant ERR-NOT-FOUND (err u100))
@@ -17,6 +17,7 @@
 (define-constant ERR-NOT-AUTHORIZED (err u104))
 (define-constant ERR-INVALID-TITLE (err u105))
 (define-constant ERR-INVALID-DESCRIPTION (err u106))
+(define-constant ERR-INVALID-PROPOSAL (err u107))
 
 ;; Data maps
 
@@ -26,22 +27,33 @@
     {
         title: (string-utf8 50),
         description: (string-utf8 500),
+        proposer: principal,
         votes-for: uint,
         votes-against: uint,
-        end-block-height: uint
+        end-time: uint,                     ;; Clarity 4: Unix timestamp
+        created-at: uint,                   ;; Clarity 4: Unix timestamp
+        executed: bool,
+        quorum: uint,
+        status: (string-ascii 20)
     }
 )
 
 ;; Tracks votes cast by users
 (define-map votes
     { voter: principal, proposal-id: uint }
-    { vote: bool }
+    {
+        vote: bool,
+        timestamp: uint                     ;; Clarity 4: Unix timestamp
+    }
 )
 
 ;; Data variables
 
 ;; Keeps track of the total number of proposals
 (define-data-var proposal-count uint u0)
+
+;; Minimum quorum percentage (in basis points, 1000 = 10%)
+(define-data-var min-quorum-bps uint u1000)
 
 ;; Read-only functions
 
@@ -58,6 +70,32 @@
 ;; @returns (response {...} uint) The vote data or an error if not found
 (define-read-only (get-vote (voter principal) (proposal-id uint))
     (ok (unwrap! (map-get? votes { voter: voter, proposal-id: proposal-id }) ERR-NOT-FOUND))
+)
+
+;; Get total proposal count
+(define-read-only (get-proposal-count)
+    (ok (var-get proposal-count))
+)
+
+;; Check if voting is active for a proposal
+(define-read-only (is-voting-active (proposal-id uint))
+    (match (map-get? proposals { proposal-id: proposal-id })
+        proposal (ok (< stacks-block-time (get end-time proposal)))
+        ERR-NOT-FOUND
+    )
+)
+
+;; Get voting results for a proposal
+(define-read-only (get-voting-results (proposal-id uint))
+    (match (map-get? proposals { proposal-id: proposal-id })
+        proposal (ok {
+            votes-for: (get votes-for proposal),
+            votes-against: (get votes-against proposal),
+            total-votes: (+ (get votes-for proposal) (get votes-against proposal)),
+            status: (get status proposal)
+        })
+        ERR-NOT-FOUND
+    )
 )
 
 ;; Translates error codes into human-readable messages
@@ -80,7 +118,10 @@
                                 "Invalid title length"
                                 (if (is-eq err-value u106)
                                     "Invalid description length"
-                                    "Unknown error"
+                                    (if (is-eq err-value u107)
+                                        "Invalid proposal"
+                                        "Unknown error"
+                                    )
                                 )
                             )
                         )
@@ -108,19 +149,31 @@
         (let
             (
                 (new-proposal-id (+ (var-get proposal-count) u1))
-                (end-block-height (+ block-height VOTING-PERIOD))
+                (end-time (+ stacks-block-time VOTING-PERIOD))  ;; Clarity 4: Unix timestamp
             )
             (map-set proposals
                 { proposal-id: new-proposal-id }
                 {
                     title: title,
                     description: description,
+                    proposer: tx-sender,
                     votes-for: u0,
                     votes-against: u0,
-                    end-block-height: end-block-height
+                    end-time: end-time,
+                    created-at: stacks-block-time,              ;; Clarity 4: Unix timestamp
+                    executed: false,
+                    quorum: (var-get min-quorum-bps),
+                    status: "active"
                 }
             )
             (var-set proposal-count new-proposal-id)
+            (print {
+                event: "proposal-created",
+                proposal-id: new-proposal-id,
+                proposer: tx-sender,
+                title: title,
+                end-time: end-time
+            })
             (ok new-proposal-id)
         )
     )
@@ -133,27 +186,36 @@
 (define-public (vote (proposal-id uint) (vote-for bool))
     (let
         (
-            (proposal (try! (get-proposal proposal-id)))
+            (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
             (existing-vote (map-get? votes { voter: tx-sender, proposal-id: proposal-id }))
-            (checked-vote (if vote-for true false))
         )
-        (asserts! (< block-height (get end-block-height proposal)) ERR-VOTING-ENDED)
+        (asserts! (< stacks-block-time (get end-time proposal)) ERR-VOTING-ENDED)
         (asserts! (is-none existing-vote) ERR-ALREADY-VOTED)
-        
+
         (map-set votes
             { voter: tx-sender, proposal-id: proposal-id }
-            { vote: checked-vote }
+            {
+                vote: vote-for,
+                timestamp: stacks-block-time                    ;; Clarity 4: Unix timestamp
+            }
         )
-        
+
         (map-set proposals
             { proposal-id: proposal-id }
-            (merge proposal 
+            (merge proposal
                 {
-                    votes-for: (if checked-vote (+ (get votes-for proposal) u1) (get votes-for proposal)),
-                    votes-against: (if (not checked-vote) (+ (get votes-against proposal) u1) (get votes-against proposal))
+                    votes-for: (if vote-for (+ (get votes-for proposal) u1) (get votes-for proposal)),
+                    votes-against: (if (not vote-for) (+ (get votes-against proposal) u1) (get votes-against proposal))
                 }
             )
         )
+        (print {
+            event: "vote-cast",
+            proposal-id: proposal-id,
+            voter: tx-sender,
+            vote-for: vote-for,
+            timestamp: stacks-block-time
+        })
         (ok true)
     )
 )
@@ -166,13 +228,38 @@
 (define-public (end-voting (proposal-id uint))
     (let
         (
-            (proposal (try! (get-proposal proposal-id)))
+            (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
         )
-        (asserts! (>= block-height (get end-block-height proposal)) ERR-VOTING-NOT-ENDED)
+        (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
         (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
-        
-        ;; Implement any post-voting logic here
-        
+
+        (let
+            (
+                (total-votes (+ (get votes-for proposal) (get votes-against proposal)))
+                (new-status (if (> (get votes-for proposal) (get votes-against proposal)) "passed" "rejected"))
+            )
+            (map-set proposals
+                { proposal-id: proposal-id }
+                (merge proposal { status: new-status })
+            )
+            (print {
+                event: "voting-ended",
+                proposal-id: proposal-id,
+                status: new-status,
+                votes-for: (get votes-for proposal),
+                votes-against: (get votes-against proposal)
+            })
+            (ok true)
+        )
+    )
+)
+
+;; Update minimum quorum requirement
+(define-public (set-min-quorum (new-quorum-bps uint))
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        (asserts! (<= new-quorum-bps u10000) ERR-INVALID-PROPOSAL)
+        (var-set min-quorum-bps new-quorum-bps)
         (ok true)
     )
 )
