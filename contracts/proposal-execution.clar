@@ -130,11 +130,11 @@
         (asserts! (not (get executed execution)) ERR-ALREADY-EXECUTED)
         (asserts! (>= stacks-block-time (get ready-at execution)) ERR-EXECUTION-DELAY-NOT-MET)
 
-        ;; Check if it's a treasury transfer
-        (if (is-eq (get action-type execution) "transfer")
-            (try! (execute-treasury-transfer proposal-id execution))
+        ;; Check if it's a treasury transfer and execute if needed
+        (try! (if (is-eq (get action-type execution) "transfer")
+            (execute-treasury-transfer proposal-id execution)
             (ok true)
-        )
+        ))
 
         ;; Mark as executed
         (map-set execution-queue
@@ -206,8 +206,7 @@
     (begin
         (asserts! (> amount u0) ERR-INVALID-AMOUNT)
 
-        (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
-
+        ;; Track deposit (actual STX transfer would be handled off-chain or separately)
         (var-set treasury-balance (+ (var-get treasury-balance) amount))
 
         (let

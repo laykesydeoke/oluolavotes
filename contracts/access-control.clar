@@ -119,21 +119,21 @@
 
 ;; Check if user can create proposals
 (define-read-only (can-create-proposal (user principal))
-    (or
-        (unwrap! (has-role user ROLE-ADMIN) (ok false))
-        (unwrap! (has-role user ROLE-PROPOSER) (ok false))
-    )
+    (ok (or
+        (unwrap-panic (has-role user ROLE-ADMIN))
+        (unwrap-panic (has-role user ROLE-PROPOSER))
+    ))
 )
 
 ;; Check if user can vote
 (define-read-only (can-vote (user principal))
-    (or
-        (unwrap! (has-role user ROLE-ADMIN) (ok false))
+    (ok (or
+        (unwrap-panic (has-role user ROLE-ADMIN))
         (or
-            (unwrap! (has-role user ROLE-VOTER) (ok false))
-            (unwrap! (has-role user ROLE-PROPOSER) (ok false))
+            (unwrap-panic (has-role user ROLE-VOTER))
+            (unwrap-panic (has-role user ROLE-PROPOSER))
         )
-    )
+    ))
 )
 
 ;; Get role information

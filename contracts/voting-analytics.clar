@@ -225,7 +225,8 @@
         (let
             (
                 (history-index (default-to u0 (map-get? reputation-count { voter: proposer })))
-                (current-score (default-to u0 (get reputation-score (default-to { total-votes-cast: u0, proposals-created: u0, first-vote: u0, last-vote: u0, reputation-score: u0, active-streak: u0 } (map-get? voter-stats { voter: proposer })))))
+                (current-stats (unwrap-panic (map-get? voter-stats { voter: proposer })))
+                (current-score (get reputation-score current-stats))
             )
             (map-set reputation-history
                 { voter: proposer, index: history-index }

@@ -99,14 +99,14 @@
         (asserts! (not (unwrap! (is-delegated delegate) ERR-INVALID-DELEGATE)) ERR-CIRCULAR-DELEGATION)
 
         ;; Check if already delegated
-        (match (map-get? delegations { delegator: tx-sender })
+        (try! (match (map-get? delegations { delegator: tx-sender })
             existing-delegation
                 (if (get active existing-delegation)
                     ERR-ALREADY-DELEGATED
                     (ok true)
                 )
             (ok true)
-        )
+        ))
 
         (let
             (

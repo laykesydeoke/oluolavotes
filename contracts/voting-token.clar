@@ -1,9 +1,6 @@
 ;; Voting Token - SIP-010 Governance Token (Clarity 4)
 ;; This contract implements a fungible token for governance voting
 
-;; Trait implementation
-(impl-trait 'SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard.sip-010-trait)
-
 ;; Constants
 (define-constant CONTRACT-OWNER tx-sender)
 (define-constant TOKEN-NAME "OluolaVote Token")
@@ -57,7 +54,10 @@
                 { holder: recipient }
                 {
                     balance: (+ (default-to u0 (map-get? balances recipient)) amount),
-                    first-received: (default-to stacks-block-time (get first-received (default-to { balance: u0, first-received: stacks-block-time, last-updated: stacks-block-time } (map-get? token-holders { holder: recipient })))),
+                    first-received: (match (map-get? token-holders { holder: recipient })
+                        holder-info (get first-received holder-info)
+                        stacks-block-time
+                    ),
                     last-updated: stacks-block-time          ;; Clarity 4: Unix timestamp
                 }
             )
@@ -115,7 +115,10 @@
             { holder: recipient }
             {
                 balance: (+ (default-to u0 (map-get? balances recipient)) amount),
-                first-received: (default-to stacks-block-time (get first-received (default-to { balance: u0, first-received: stacks-block-time, last-updated: stacks-block-time } (map-get? token-holders { holder: recipient })))),
+                first-received: (match (map-get? token-holders { holder: recipient })
+                    holder-info (get first-received holder-info)
+                    stacks-block-time
+                ),
                 last-updated: stacks-block-time              ;; Clarity 4: Unix timestamp
             }
         )
@@ -147,7 +150,10 @@
             { holder: tx-sender }
             {
                 balance: (- sender-balance amount),
-                first-received: (default-to stacks-block-time (get first-received (default-to { balance: u0, first-received: stacks-block-time, last-updated: stacks-block-time } (map-get? token-holders { holder: tx-sender })))),
+                first-received: (match (map-get? token-holders { holder: tx-sender })
+                    holder-info (get first-received holder-info)
+                    stacks-block-time
+                ),
                 last-updated: stacks-block-time              ;; Clarity 4: Unix timestamp
             }
         )
