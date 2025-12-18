@@ -15,6 +15,8 @@
 (define-constant ERR-ALREADY-VOTED (err u102))
 (define-constant ERR-VOTING-NOT-ENDED (err u103))
 (define-constant ERR-NOT-AUTHORIZED (err u104))
+(define-constant ERR-INVALID-TITLE (err u105))
+(define-constant ERR-INVALID-DESCRIPTION (err u106))
 
 ;; Data maps
 
@@ -74,7 +76,13 @@
                         "Voting period has not ended yet"
                         (if (is-eq err-value u104)
                             "Not authorized to perform this action"
-                            "Unknown error"
+                            (if (is-eq err-value u105)
+                                "Invalid title length"
+                                (if (is-eq err-value u106)
+                                    "Invalid description length"
+                                    "Unknown error"
+                                )
+                            )
                         )
                     )
                 )
@@ -92,21 +100,29 @@
 (define-public (create-proposal (title (string-utf8 50)) (description (string-utf8 500)))
     (let
         (
-            (new-proposal-id (+ (var-get proposal-count) u1))
-            (end-block-height (+ block-height VOTING-PERIOD))
+            (title-length (len title))
+            (description-length (len description))
         )
-        (map-set proposals
-            { proposal-id: new-proposal-id }
-            {
-                title: title,
-                description: description,
-                votes-for: u0,
-                votes-against: u0,
-                end-block-height: end-block-height
-            }
+        (asserts! (and (> title-length u0) (<= title-length u50)) ERR-INVALID-TITLE)
+        (asserts! (and (> description-length u0) (<= description-length u500)) ERR-INVALID-DESCRIPTION)
+        (let
+            (
+                (new-proposal-id (+ (var-get proposal-count) u1))
+                (end-block-height (+ block-height VOTING-PERIOD))
+            )
+            (map-set proposals
+                { proposal-id: new-proposal-id }
+                {
+                    title: title,
+                    description: description,
+                    votes-for: u0,
+                    votes-against: u0,
+                    end-block-height: end-block-height
+                }
+            )
+            (var-set proposal-count new-proposal-id)
+            (ok new-proposal-id)
         )
-        (var-set proposal-count new-proposal-id)
-        (ok new-proposal-id)
     )
 )
 
@@ -119,21 +135,22 @@
         (
             (proposal (try! (get-proposal proposal-id)))
             (existing-vote (map-get? votes { voter: tx-sender, proposal-id: proposal-id }))
+            (checked-vote (if vote-for true false))
         )
         (asserts! (< block-height (get end-block-height proposal)) ERR-VOTING-ENDED)
         (asserts! (is-none existing-vote) ERR-ALREADY-VOTED)
         
         (map-set votes
             { voter: tx-sender, proposal-id: proposal-id }
-            { vote: vote-for }
+            { vote: checked-vote }
         )
         
         (map-set proposals
             { proposal-id: proposal-id }
             (merge proposal 
                 {
-                    votes-for: (if vote-for (+ (get votes-for proposal) u1) (get votes-for proposal)),
-                    votes-against: (if (not vote-for) (+ (get votes-against proposal) u1) (get votes-against proposal))
+                    votes-for: (if checked-vote (+ (get votes-for proposal) u1) (get votes-for proposal)),
+                    votes-against: (if (not checked-vote) (+ (get votes-against proposal) u1) (get votes-against proposal))
                 }
             )
         )

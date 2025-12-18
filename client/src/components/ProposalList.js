@@ -1,10 +1,23 @@
 import React from 'react';
-// import Proposal from './Proposal';
+import Proposal from './Proposal';
+import styled from 'styled-components';
+
+const ProposalListContainer = styled.div`
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+`;
+
+const Title = styled.h2`
+  color: #333;
+  margin-bottom: 15px;
+`;
 
 const ProposalList = ({ proposals, doContractCall, onVoteOrEnd }) => {
   return (
-    <div>
-      <h2>Proposals</h2>
+    <ProposalListContainer>
+      <Title>Proposals</Title>
       {proposals.map((proposal) => (
         <Proposal
           key={proposal.proposalId}
@@ -13,7 +26,7 @@ const ProposalList = ({ proposals, doContractCall, onVoteOrEnd }) => {
           onVoteOrEnd={onVoteOrEnd}
         />
       ))}
-    </div>
+    </ProposalListContainer>
   );
 };
 
