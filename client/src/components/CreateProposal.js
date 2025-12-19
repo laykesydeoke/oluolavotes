@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { stringAsciiCV } from '@stacks/transactions';
+import { stringUtf8CV } from '@stacks/transactions';
 import { getContractInfo } from '../utils/votingApi';
 import styled from 'styled-components';
 
@@ -47,7 +47,7 @@ const CreateProposal = ({ doContractCall, onProposalCreated }) => {
       contractAddress,
       contractName,
       functionName: 'create-proposal',
-      functionArgs: [stringAsciiCV(newProposal.title), stringAsciiCV(newProposal.description)],
+      functionArgs: [stringUtf8CV(newProposal.title), stringUtf8CV(newProposal.description)],
       onFinish: (data) => {
         console.log('Proposal created:', data);
         onProposalCreated();
