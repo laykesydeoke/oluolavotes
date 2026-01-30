@@ -12,6 +12,9 @@
 ;; The duration of the voting period in seconds (Clarity 4: ~7 days)
 (define-constant VOTING-PERIOD u604800)
 
+;; Proposal deposit requirement (1000 tokens)
+(define-constant PROPOSAL-DEPOSIT u1000)
+
 ;; Error codes
 (define-constant ERR-NOT-FOUND (err u100))
 (define-constant ERR-VOTING-ENDED (err u101))
@@ -21,6 +24,8 @@
 (define-constant ERR-INVALID-TITLE (err u105))
 (define-constant ERR-INVALID-DESCRIPTION (err u106))
 (define-constant ERR-INVALID-PROPOSAL (err u107))
+(define-constant ERR-INSUFFICIENT-BALANCE (err u108))
+(define-constant ERR-ALREADY-EXECUTED (err u109))
 
 ;; Data maps
 
@@ -63,6 +68,15 @@
     { proposal-id: uint, voter: principal }
     { amount: uint, locked-at: uint }
 )
+
+;; Proposal deposits (refunded if proposal passes, burned if rejected)
+(define-map proposal-deposits
+    { proposal-id: uint }
+    { depositor: principal, amount: uint, refunded: bool }
+)
+
+;; Reentrancy guard
+(define-data-var reentrancy-guard bool false)
 
 ;; Read-only functions
 
@@ -166,11 +180,25 @@
             (title-length (len title))
             (description-length (len description))
         )
+        ;; Reentrancy guard
+        (asserts! (not (var-get reentrancy-guard)) ERR-NOT-AUTHORIZED)
+        (var-set reentrancy-guard true)
+
         ;; Check if user can create proposals via access control
         (asserts! (unwrap-panic (contract-call? .access-control can-create-proposal tx-sender)) ERR-NOT-AUTHORIZED)
 
         (asserts! (and (> title-length u0) (<= title-length u100)) ERR-INVALID-TITLE)
         (asserts! (and (> description-length u0) (<= description-length u500)) ERR-INVALID-DESCRIPTION)
+
+        ;; Check user has enough tokens for deposit
+        (let
+            (
+                (user-balance (unwrap-panic (contract-call? .voting-token get-balance tx-sender)))
+            )
+            (asserts! (>= user-balance PROPOSAL-DEPOSIT) ERR-INSUFFICIENT-BALANCE)
+
+            ;; Lock deposit tokens
+            (unwrap-panic (contract-call? .voting-token lock PROPOSAL-DEPOSIT tx-sender))
         (let
             (
                 (new-proposal-id (+ (var-get proposal-count) u1))
@@ -193,6 +221,12 @@
             )
             (var-set proposal-count new-proposal-id)
 
+            ;; Track deposit
+            (map-set proposal-deposits
+                { proposal-id: new-proposal-id }
+                { depositor: tx-sender, amount: PROPOSAL-DEPOSIT, refunded: false }
+            )
+
             ;; Record proposal creation in analytics contract
             (unwrap-panic (contract-call? .voting-analytics record-proposal-creation tx-sender new-proposal-id))
 
@@ -201,9 +235,14 @@
                 proposal-id: new-proposal-id,
                 proposer: tx-sender,
                 title: title,
-                end-time: end-time
+                end-time: end-time,
+                deposit: PROPOSAL-DEPOSIT
             })
+
+            ;; Release reentrancy guard
+            (var-set reentrancy-guard false)
             (ok new-proposal-id)
+        )
         )
     )
 )
@@ -354,6 +393,10 @@
             (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
             (escrow (unwrap! (map-get? escrowed-tokens { proposal-id: proposal-id, voter: tx-sender }) ERR-NOT-FOUND))
         )
+        ;; Reentrancy guard
+        (asserts! (not (var-get reentrancy-guard)) ERR-NOT-AUTHORIZED)
+        (var-set reentrancy-guard true)
+
         ;; Ensure voting has ended
         (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
 
@@ -370,6 +413,61 @@
             amount: (get amount escrow),
             timestamp: stacks-block-time
         })
+
+        ;; Release reentrancy guard
+        (var-set reentrancy-guard false)
+        (ok true)
+    )
+)
+
+;; Refund or burn proposal deposit after voting ends
+(define-public (process-proposal-deposit (proposal-id uint))
+    (let
+        (
+            (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
+            (deposit (unwrap! (map-get? proposal-deposits { proposal-id: proposal-id }) ERR-NOT-FOUND))
+        )
+        ;; Reentrancy guard
+        (asserts! (not (var-get reentrancy-guard)) ERR-NOT-AUTHORIZED)
+        (var-set reentrancy-guard true)
+
+        ;; Ensure voting has ended
+        (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
+        (asserts! (not (get refunded deposit)) ERR-ALREADY-EXECUTED)
+
+        (if (is-eq (get status proposal) "passed")
+            ;; Refund deposit if proposal passed
+            (begin
+                (unwrap-panic (contract-call? .voting-token unlock (get amount deposit) (get depositor deposit)))
+                (map-set proposal-deposits
+                    { proposal-id: proposal-id }
+                    (merge deposit { refunded: true })
+                )
+                (print {
+                    event: "deposit-refunded",
+                    proposal-id: proposal-id,
+                    depositor: (get depositor deposit),
+                    amount: (get amount deposit)
+                })
+            )
+            ;; Burn deposit if proposal rejected
+            (begin
+                (unwrap-panic (contract-call? .voting-token burn (get amount deposit) (get depositor deposit)))
+                (map-set proposal-deposits
+                    { proposal-id: proposal-id }
+                    (merge deposit { refunded: true })
+                )
+                (print {
+                    event: "deposit-burned",
+                    proposal-id: proposal-id,
+                    depositor: (get depositor deposit),
+                    amount: (get amount deposit)
+                })
+            )
+        )
+
+        ;; Release reentrancy guard
+        (var-set reentrancy-guard false)
         (ok true)
     )
 )
