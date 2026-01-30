@@ -318,7 +318,11 @@
         (
             (execution (unwrap! (map-get? execution-queue { proposal-id: proposal-id }) ERR-PROPOSAL-NOT-FOUND))
         )
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        ;; Check admin or moderator access via access-control
+        (asserts! (or
+            (unwrap-panic (contract-call? .access-control is-admin tx-sender))
+            (unwrap-panic (contract-call? .access-control is-moderator tx-sender))
+        ) ERR-NOT-AUTHORIZED)
         (asserts! (not (get executed execution)) ERR-ALREADY-EXECUTED)
 
         (map-delete execution-queue { proposal-id: proposal-id })
