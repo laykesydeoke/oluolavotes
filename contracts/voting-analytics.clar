@@ -113,6 +113,22 @@
     )
 )
 
+;; Get voter reputation score
+(define-read-only (get-reputation-score (voter principal))
+    (match (map-get? voter-stats { voter: voter })
+        stats (ok (get reputation-score stats))
+        (ok u0)
+    )
+)
+
+;; Check if voter is active
+(define-read-only (is-active-voter (voter principal))
+    (match (map-get? voter-stats { voter: voter })
+        stats (ok (> (get total-votes-cast stats) u0))
+        (ok false)
+    )
+)
+
 ;; Public functions
 
 ;; Record vote (should be called by voting contract)
