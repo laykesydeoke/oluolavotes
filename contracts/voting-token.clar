@@ -47,8 +47,11 @@
         (let
             (
                 (sender-balance (default-to u0 (map-get? balances sender)))
+                (locked-balance (default-to u0 (map-get? locked-tokens sender)))
+                (available-balance (- sender-balance locked-balance))
             )
             (asserts! (>= sender-balance amount) ERR-INSUFFICIENT-BALANCE)
+            (asserts! (>= available-balance amount) ERR-INSUFFICIENT-BALANCE)
 
             (map-set balances sender (- sender-balance amount))
             (map-set balances recipient (+ (default-to u0 (map-get? balances recipient)) amount))
@@ -206,8 +209,19 @@
             (current-locked (default-to u0 (map-get? locked-tokens holder)))
             (balance (default-to u0 (map-get? balances holder)))
         )
+        (asserts! (is-eq tx-sender holder) ERR-NOT-AUTHORIZED)
+        (asserts! (> amount u0) ERR-INVALID-AMOUNT)
         (asserts! (>= balance (+ current-locked amount)) ERR-INSUFFICIENT-BALANCE)
+
         (map-set locked-tokens holder (+ current-locked amount))
+
+        (print {
+            event: "tokens-locked",
+            holder: holder,
+            amount: amount,
+            total-locked: (+ current-locked amount),
+            timestamp: stacks-block-time
+        })
         (ok true)
     )
 )
@@ -217,8 +231,19 @@
         (
             (current-locked (default-to u0 (map-get? locked-tokens holder)))
         )
+        (asserts! (is-eq tx-sender holder) ERR-NOT-AUTHORIZED)
+        (asserts! (> amount u0) ERR-INVALID-AMOUNT)
         (asserts! (>= current-locked amount) ERR-INSUFFICIENT-BALANCE)
+
         (map-set locked-tokens holder (- current-locked amount))
+
+        (print {
+            event: "tokens-unlocked",
+            holder: holder,
+            amount: amount,
+            remaining-locked: (- current-locked amount),
+            timestamp: stacks-block-time
+        })
         (ok true)
     )
 )
