@@ -117,6 +117,27 @@
     (has-role user ROLE-MODERATOR)
 )
 
+;; Check if user is voter
+(define-read-only (is-voter (user principal))
+    (has-role user ROLE-VOTER)
+)
+
+;; Check if user has any role
+(define-read-only (has-any-role (user principal))
+    (ok (or
+        (unwrap-panic (is-admin user))
+        (or
+            (unwrap-panic (is-moderator user))
+            (unwrap-panic (is-voter user))
+        )
+    ))
+)
+
+;; Get role info
+(define-read-only (get-role-info (user principal) (role uint))
+    (ok (map-get? user-roles { user: user, role: role }))
+)
+
 ;; Check if user can create proposals
 (define-read-only (can-create-proposal (user principal))
     (ok (or
