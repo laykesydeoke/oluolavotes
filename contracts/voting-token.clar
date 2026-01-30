@@ -18,10 +18,12 @@
 (define-constant ERR-TRANSFER-FAILED (err u404))
 (define-constant ERR-MINT-FAILED (err u405))
 (define-constant ERR-BURN-FAILED (err u406))
+(define-constant ERR-PAUSED (err u407))
 
 ;; Data variables
 (define-data-var token-uri (optional (string-utf8 256)) none)
 (define-data-var total-supply uint u0)
+(define-data-var contract-paused bool false)
 
 ;; Data maps
 (define-map balances principal uint)
@@ -41,6 +43,7 @@
 
 (define-public (transfer (amount uint) (sender principal) (recipient principal) (memo (optional (buff 34))))
     (begin
+        (asserts! (not (var-get contract-paused)) ERR-PAUSED)
         (asserts! (is-eq tx-sender sender) ERR-NOT-AUTHORIZED)
         (asserts! (> amount u0) ERR-INVALID-AMOUNT)
 
@@ -116,6 +119,7 @@
             (token-amount (* stx-amount u1000))
             (sender-stx-before (stx-get-balance tx-sender))
         )
+        (asserts! (not (var-get contract-paused)) ERR-PAUSED)
         (asserts! (> stx-amount u0) ERR-INVALID-AMOUNT)
         (asserts! (>= sender-stx-before stx-amount) ERR-INSUFFICIENT-BALANCE)
 
@@ -304,4 +308,37 @@
         })
         (ok true)
     )
+)
+
+;; Emergency pause functions (admin only)
+(define-public (pause-contract)
+    (begin
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
+        (asserts! (not (var-get contract-paused)) ERR-PAUSED)
+        (var-set contract-paused true)
+        (print {
+            event: "contract-paused",
+            admin: tx-sender,
+            timestamp: stacks-block-time
+        })
+        (ok true)
+    )
+)
+
+(define-public (unpause-contract)
+    (begin
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
+        (asserts! (var-get contract-paused) ERR-NOT-AUTHORIZED)
+        (var-set contract-paused false)
+        (print {
+            event: "contract-unpaused",
+            admin: tx-sender,
+            timestamp: stacks-block-time
+        })
+        (ok true)
+    )
+)
+
+(define-read-only (is-paused)
+    (ok (var-get contract-paused))
 )

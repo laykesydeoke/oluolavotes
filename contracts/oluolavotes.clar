@@ -420,6 +420,59 @@
     )
 )
 
+;; Private helper: Release escrow for a single proposal (no reentrancy guard)
+(define-private (release-escrow-internal (proposal-id uint))
+    (let
+        (
+            (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
+            (escrow (unwrap! (map-get? escrowed-tokens { proposal-id: proposal-id, voter: tx-sender }) ERR-NOT-FOUND))
+        )
+        ;; Ensure voting has ended
+        (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
+
+        ;; Unlock tokens
+        (try! (contract-call? .voting-token unlock (get amount escrow) tx-sender))
+
+        ;; Remove escrow record
+        (map-delete escrowed-tokens { proposal-id: proposal-id, voter: tx-sender })
+
+        (print {
+            event: "escrow-released",
+            proposal-id: proposal-id,
+            voter: tx-sender,
+            amount: (get amount escrow),
+            timestamp: stacks-block-time
+        })
+        (ok (get amount escrow))
+    )
+)
+
+;; Batch release escrow for multiple proposals
+(define-public (batch-release-escrow (proposal-ids (list 10 uint)))
+    (begin
+        ;; Reentrancy guard
+        (asserts! (not (var-get reentrancy-guard)) ERR-NOT-AUTHORIZED)
+        (var-set reentrancy-guard true)
+
+        ;; Release escrow for each proposal
+        (let
+            (
+                (results (map release-escrow-internal proposal-ids))
+            )
+            (print {
+                event: "batch-escrow-released",
+                voter: tx-sender,
+                proposal-count: (len proposal-ids),
+                timestamp: stacks-block-time
+            })
+
+            ;; Release reentrancy guard
+            (var-set reentrancy-guard false)
+            (ok true)
+        )
+    )
+)
+
 ;; Refund or burn proposal deposit after voting ends
 (define-public (process-proposal-deposit (proposal-id uint))
     (let
