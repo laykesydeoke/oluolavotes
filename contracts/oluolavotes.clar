@@ -1,6 +1,9 @@
 ;; Decentralized Voting System - Clarity 4
 ;; This contract implements a decentralized voting system with time-based voting periods
 
+;; Traits (will be enabled after trait contracts deployed)
+;; (impl-trait .governance-trait.governance-trait)
+
 ;; Constants
 
 ;; The principal who deployed the contract and has administrative privileges
@@ -25,7 +28,7 @@
 (define-map proposals
     { proposal-id: uint }
     {
-        title: (string-utf8 50),
+        title: (string-utf8 100),
         description: (string-utf8 500),
         proposer: principal,
         votes-for: uint,
@@ -61,7 +64,20 @@
 ;; @param proposal-id The unique identifier of the proposal
 ;; @returns (response {...} uint) The proposal data or an error if not found
 (define-read-only (get-proposal (proposal-id uint))
-    (ok (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
+    (match (map-get? proposals { proposal-id: proposal-id })
+        proposal (ok {
+            proposer: (get proposer proposal),
+            title: (get title proposal),
+            description: (get description proposal),
+            start-block: (get created-at proposal),
+            end-block: (get end-time proposal),
+            votes-for: (get votes-for proposal),
+            votes-against: (get votes-against proposal),
+            votes-abstain: u0,
+            executed: (get executed proposal)
+        })
+        ERR-NOT-FOUND
+    )
 )
 
 ;; Retrieves a user's vote for a specific proposal
@@ -135,16 +151,16 @@
 ;; Public functions
 
 ;; Creates a new proposal
-;; @param title The title of the proposal (max 50 characters)
+;; @param title The title of the proposal (max 100 characters)
 ;; @param description The description of the proposal (max 500 characters)
 ;; @returns (response uint uint) The new proposal ID or an error
-(define-public (create-proposal (title (string-utf8 50)) (description (string-utf8 500)))
+(define-public (create-proposal (title (string-utf8 100)) (description (string-utf8 500)))
     (let
         (
             (title-length (len title))
             (description-length (len description))
         )
-        (asserts! (and (> title-length u0) (<= title-length u50)) ERR-INVALID-TITLE)
+        (asserts! (and (> title-length u0) (<= title-length u100)) ERR-INVALID-TITLE)
         (asserts! (and (> description-length u0) (<= description-length u500)) ERR-INVALID-DESCRIPTION)
         (let
             (
@@ -252,6 +268,25 @@
             (ok true)
         )
     )
+)
+
+;; Trait implementation: has-voted
+(define-read-only (has-voted (proposal-id uint) (voter principal))
+    (match (map-get? votes { voter: voter, proposal-id: proposal-id })
+        vote-data (ok true)
+        (ok false)
+    )
+)
+
+;; Trait implementation: get-voting-power
+(define-read-only (get-voting-power (voter principal))
+    ;; Default voting power is 1
+    (ok u1)
+)
+
+;; Trait implementation: is-proposal-active
+(define-read-only (is-proposal-active (proposal-id uint))
+    (is-voting-active proposal-id)
 )
 
 ;; Update minimum quorum requirement
