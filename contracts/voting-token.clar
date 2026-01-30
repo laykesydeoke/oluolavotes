@@ -107,7 +107,8 @@
 ;; Mint new tokens (only contract owner)
 (define-public (mint (amount uint) (recipient principal))
     (begin
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        ;; Check admin access via access-control
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
         (asserts! (> amount u0) ERR-INVALID-AMOUNT)
 
         (map-set balances recipient (+ (default-to u0 (map-get? balances recipient)) amount))
