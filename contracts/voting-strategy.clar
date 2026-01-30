@@ -118,7 +118,8 @@
 ;; Configure voting strategy for a proposal (only owner)
 (define-public (configure-strategy (proposal-id uint) (strategy-type uint) (min-weight uint) (max-weight uint) (requires-token bool))
     (begin
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        ;; Check admin access via access-control
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
         (asserts! (or
             (is-eq strategy-type STRATEGY-SIMPLE)
             (or
