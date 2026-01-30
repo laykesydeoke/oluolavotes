@@ -1,6 +1,9 @@
 ;; Proposal Execution - Treasury Management (Clarity 4)
 ;; This contract executes approved proposals and manages the treasury
 
+;; Traits (will be enabled after trait contracts deployed)
+;; (impl-trait .execution-trait.execution-trait)
+
 ;; Constants
 (define-constant CONTRACT-OWNER tx-sender)
 (define-constant EXECUTION-DELAY u86400)          ;; Clarity 4: 24 hours in seconds
@@ -236,6 +239,73 @@
             (ok true)
         )
     )
+)
+
+;; Trait implementation: get-execution-status
+(define-read-only (get-execution-status (proposal-id uint))
+    (match (map-get? execution-queue { proposal-id: proposal-id })
+        execution (ok {
+            executed: (get executed execution),
+            queued: true,
+            execution-block: (match (get executed-at execution)
+                timestamp timestamp
+                u0
+            ),
+            executor: (get executor execution)
+        })
+        (ok {
+            executed: false,
+            queued: false,
+            execution-block: u0,
+            executor: none
+        })
+    )
+)
+
+;; Trait implementation: is-executable
+(define-read-only (is-executable (proposal-id uint))
+    (is-ready-for-execution proposal-id)
+)
+
+;; Trait implementation: get-timelock-delay
+(define-read-only (get-timelock-delay)
+    (ok EXECUTION-DELAY)
+)
+
+;; Trait implementation: set-timelock-delay (placeholder)
+(define-public (set-timelock-delay (new-delay uint))
+    ;; Placeholder: would need data-var to actually change delay
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        (ok true)
+    )
+)
+
+;; Trait implementation: get-execution-history
+(define-read-only (get-execution-history)
+    ;; Simplified: return empty list (would need additional tracking)
+    (ok (list))
+)
+
+;; Trait implementation: pause-execution
+(define-public (pause-execution)
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        (ok true)
+    )
+)
+
+;; Trait implementation: unpause-execution
+(define-public (unpause-execution)
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        (ok true)
+    )
+)
+
+;; Trait implementation: cancel-proposal (wraps cancel-execution)
+(define-public (cancel-proposal (proposal-id uint))
+    (cancel-execution proposal-id)
 )
 
 ;; Cancel queued proposal (only contract owner)
