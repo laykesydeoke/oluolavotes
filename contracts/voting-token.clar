@@ -9,6 +9,7 @@
 (define-constant TOKEN-NAME "OluolaVote Token")
 (define-constant TOKEN-SYMBOL "OVOTE")
 (define-constant TOKEN-DECIMALS u6)
+(define-constant TREASURY-ADDRESS CONTRACT-OWNER) ;; Treasury receives STX from token purchases
 
 ;; Error codes
 (define-constant ERR-NOT-AUTHORIZED (err u401))
@@ -103,6 +104,45 @@
 )
 
 ;; Governance-specific functions
+
+;; Purchase tokens with STX (1 STX = 1000 tokens)
+(define-public (buy-tokens (stx-amount uint))
+    (let
+        (
+            (token-amount (* stx-amount u1000))
+        )
+        (asserts! (> stx-amount u0) ERR-INVALID-AMOUNT)
+
+        ;; Transfer STX from buyer to treasury
+        (try! (stx-transfer? stx-amount tx-sender TREASURY-ADDRESS))
+
+        ;; Mint tokens to buyer
+        (map-set balances tx-sender (+ (default-to u0 (map-get? balances tx-sender)) token-amount))
+        (var-set total-supply (+ (var-get total-supply) token-amount))
+
+        ;; Update holder tracking
+        (map-set token-holders
+            { holder: tx-sender }
+            {
+                balance: (+ (default-to u0 (map-get? balances tx-sender)) token-amount),
+                first-received: (match (map-get? token-holders { holder: tx-sender })
+                    holder-info (get first-received holder-info)
+                    stacks-block-time
+                ),
+                last-updated: stacks-block-time
+            }
+        )
+
+        (print {
+            event: "tokens-purchased",
+            buyer: tx-sender,
+            stx-amount: stx-amount,
+            token-amount: token-amount,
+            timestamp: stacks-block-time
+        })
+        (ok token-amount)
+    )
+)
 
 ;; Mint new tokens (only contract owner)
 (define-public (mint (amount uint) (recipient principal))
