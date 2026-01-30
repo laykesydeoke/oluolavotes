@@ -92,7 +92,8 @@
 ;; Queue proposal for execution (only contract owner or authorized)
 (define-public (queue-proposal (proposal-id uint) (action-type (string-ascii 50)) (recipient (optional principal)) (amount uint))
     (begin
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        ;; Check admin access via access-control
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
         (asserts! (is-none (map-get? execution-queue { proposal-id: proposal-id })) ERR-ALREADY-EXECUTED)
 
         (let
@@ -132,6 +133,9 @@
         )
         (asserts! (not (get executed execution)) ERR-ALREADY-EXECUTED)
         (asserts! (>= stacks-block-time (get ready-at execution)) ERR-EXECUTION-DELAY-NOT-MET)
+
+        ;; Verify proposal exists and passed in governance contract
+        (unwrap-panic (contract-call? .oluolavotes get-proposal proposal-id))
 
         ;; Check if it's a treasury transfer and execute if needed
         (try! (if (is-eq (get action-type execution) "transfer")
