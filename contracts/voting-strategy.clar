@@ -1,6 +1,9 @@
 ;; Voting Strategy - Multiple Voting Mechanisms (Clarity 4)
 ;; This contract implements various voting strategies: simple, weighted, quadratic, ranked-choice
 
+;; Traits (will be enabled after trait contracts deployed)
+;; (impl-trait .strategy-trait.strategy-trait)
+
 ;; Constants
 (define-constant CONTRACT-OWNER tx-sender)
 
@@ -259,6 +262,71 @@
         })
         (ok true)
     )
+)
+
+;; Trait implementation: calculate-voting-power
+(define-read-only (calculate-voting-power (voter principal) (proposal-id uint))
+    ;; Return base voting power of 1
+    (ok u1)
+)
+
+;; Trait implementation: validate-vote
+(define-read-only (validate-vote (proposal-id uint) (voter principal) (vote-for bool) (weight uint))
+    (match (map-get? proposal-strategies { proposal-id: proposal-id })
+        strategy (ok true)
+        (ok false)
+    )
+)
+
+;; Trait implementation: get-strategy-name
+(define-read-only (get-strategy-name)
+    (ok "Multi-Strategy Voting")
+)
+
+;; Trait implementation: get-strategy-params
+(define-read-only (get-strategy-params)
+    (ok {
+        weight-type: "dynamic",
+        time-weighted: false,
+        quadratic: true,
+        conviction: false
+    })
+)
+
+;; Trait implementation: calculate-quorum
+(define-read-only (calculate-quorum (proposal-id uint))
+    (ok u1000)
+)
+
+;; Trait implementation: determine-outcome
+(define-read-only (determine-outcome (proposal-id uint))
+    (match (map-get? vote-tallies { proposal-id: proposal-id })
+        tally (ok {
+            passed: (> (+ (get simple-for tally) (get weighted-for tally))
+                      (+ (get simple-against tally) (get weighted-against tally))),
+            votes-for: (+ (get simple-for tally) (get weighted-for tally)),
+            votes-against: (+ (get simple-against tally) (get weighted-against tally)),
+            votes-abstain: u0,
+            threshold-met: true
+        })
+        (ok {
+            passed: false,
+            votes-for: u0,
+            votes-against: u0,
+            votes-abstain: u0,
+            threshold-met: false
+        })
+    )
+)
+
+;; Trait implementation: can-change-vote
+(define-read-only (can-change-vote (proposal-id uint) (voter principal))
+    (ok false)
+)
+
+;; Trait implementation: get-vote-multiplier
+(define-read-only (get-vote-multiplier (voter principal) (proposal-id uint))
+    (ok u1)
 )
 
 ;; Cast ranked-choice vote
