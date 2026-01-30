@@ -160,6 +160,9 @@
             (title-length (len title))
             (description-length (len description))
         )
+        ;; Check if user can create proposals via access control
+        (asserts! (unwrap-panic (contract-call? .access-control can-create-proposal tx-sender)) ERR-NOT-AUTHORIZED)
+
         (asserts! (and (> title-length u0) (<= title-length u100)) ERR-INVALID-TITLE)
         (asserts! (and (> description-length u0) (<= description-length u500)) ERR-INVALID-DESCRIPTION)
         (let
@@ -183,6 +186,10 @@
                 }
             )
             (var-set proposal-count new-proposal-id)
+
+            ;; Record proposal creation in analytics contract
+            (unwrap-panic (contract-call? .voting-analytics record-proposal-creation tx-sender new-proposal-id))
+
             (print {
                 event: "proposal-created",
                 proposal-id: new-proposal-id,
@@ -205,6 +212,9 @@
             (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
             (existing-vote (map-get? votes { voter: tx-sender, proposal-id: proposal-id }))
         )
+        ;; Check if user can vote via access control
+        (asserts! (unwrap-panic (contract-call? .access-control can-vote tx-sender)) ERR-NOT-AUTHORIZED)
+
         (asserts! (< stacks-block-time (get end-time proposal)) ERR-VOTING-ENDED)
         (asserts! (is-none existing-vote) ERR-ALREADY-VOTED)
 
@@ -225,6 +235,10 @@
                 }
             )
         )
+
+        ;; Record vote in analytics contract
+        (unwrap-panic (contract-call? .voting-analytics record-vote tx-sender proposal-id))
+
         (print {
             event: "vote-cast",
             proposal-id: proposal-id,
@@ -280,8 +294,14 @@
 
 ;; Trait implementation: get-voting-power
 (define-read-only (get-voting-power (voter principal))
-    ;; Default voting power is 1
-    (ok u1)
+    ;; Get voting power from token contract plus delegated power
+    (let
+        (
+            (token-balance (unwrap-panic (contract-call? .voting-token get-balance voter)))
+            (delegated-power (unwrap-panic (contract-call? .vote-delegation get-effective-voting-power voter)))
+        )
+        (ok (+ token-balance delegated-power))
+    )
 )
 
 ;; Trait implementation: is-proposal-active
