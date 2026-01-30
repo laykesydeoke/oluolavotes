@@ -131,6 +131,16 @@
     )
 )
 
+;; Get escrow info for a voter
+(define-read-only (get-escrow-info (proposal-id uint) (voter principal))
+    (ok (map-get? escrowed-tokens { proposal-id: proposal-id, voter: voter }))
+)
+
+;; Get proposal deposit info
+(define-read-only (get-deposit-info (proposal-id uint))
+    (ok (map-get? proposal-deposits { proposal-id: proposal-id }))
+)
+
 ;; Translates error codes into human-readable messages
 ;; @param error-code The error code to translate
 ;; @returns (string-utf8 50) The corresponding error message

@@ -262,6 +262,17 @@
     (ok (default-to u0 (map-get? locked-tokens holder)))
 )
 
+;; Get available (unlocked) balance
+(define-read-only (get-available-balance (holder principal))
+    (let
+        (
+            (total-balance (default-to u0 (map-get? balances holder)))
+            (locked-balance (default-to u0 (map-get? locked-tokens holder)))
+        )
+        (ok (- total-balance locked-balance))
+    )
+)
+
 ;; Snapshot functions for voting power at specific block
 (define-map balance-snapshots { holder: principal, block: uint } uint)
 
@@ -273,6 +284,23 @@
     ;; For simplicity, return current total supply
     ;; In production, would need snapshot mechanism
     (ok (var-get total-supply))
+)
+
+;; Create balance snapshot (admin only)
+(define-public (create-snapshot (holder principal) (block uint))
+    (begin
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
+        (let
+            (
+                (current-balance (default-to u0 (map-get? balances holder)))
+            )
+            (map-set balance-snapshots
+                { holder: holder, block: block }
+                current-balance
+            )
+            (ok true)
+        )
+    )
 )
 
 ;; Update burn to match trait signature

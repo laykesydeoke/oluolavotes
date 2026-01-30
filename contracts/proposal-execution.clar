@@ -23,6 +23,7 @@
 (define-data-var total-executed uint u0)
 (define-data-var total-deposits uint u0)
 (define-data-var total-withdrawals uint u0)
+(define-data-var queued-proposals uint u0)
 
 ;; Data maps
 
@@ -87,6 +88,21 @@
 ;; Get treasury transaction
 (define-read-only (get-treasury-transaction (tx-id uint))
     (ok (map-get? treasury-transactions { tx-id: tx-id }))
+)
+
+;; Get total deposits
+(define-read-only (get-total-deposits)
+    (ok (var-get total-deposits))
+)
+
+;; Get total withdrawals
+(define-read-only (get-total-withdrawals)
+    (ok (var-get total-withdrawals))
+)
+
+;; Get queued proposal count
+(define-read-only (get-queued-count)
+    (ok (var-get queued-proposals))
 )
 
 ;; Public functions
@@ -176,6 +192,7 @@
                     executed: false
                 }
             )
+            (var-set queued-proposals (+ (var-get queued-proposals) u1))
             (print {
                 event: "proposal-queued",
                 proposal-id: proposal-id,
