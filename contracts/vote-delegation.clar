@@ -14,6 +14,7 @@
 (define-constant ERR-NOT-DELEGATED (err u204))
 (define-constant ERR-CIRCULAR-DELEGATION (err u205))
 (define-constant ERR-SELF-DELEGATION (err u206))
+(define-constant ERR-INSUFFICIENT-BALANCE (err u207))
 
 ;; Data maps
 
@@ -49,6 +50,15 @@
 )
 
 (define-map delegation-count { delegator: principal } uint)
+
+;; Track locked tokens for delegation
+(define-map delegation-locks
+    { delegator: principal }
+    {
+        locked-amount: uint,
+        locked-at: uint                      ;; Clarity 4: Unix timestamp
+    }
+)
 
 ;; Read-only functions
 
@@ -114,13 +124,28 @@
             (ok true)
         ))
 
+        ;; Get delegator's token balance and lock it
         (let
             (
+                (delegator-balance (unwrap! (contract-call? .voting-token get-balance tx-sender) ERR-INSUFFICIENT-BALANCE))
                 (expires-at (match duration-seconds
                     duration (some (+ stacks-block-time duration))
                     none
                 ))
                 (history-index (default-to u0 (map-get? delegation-count { delegator: tx-sender })))
+            )
+            (asserts! (> delegator-balance u0) ERR-INSUFFICIENT-BALANCE)
+
+            ;; Lock the delegator's tokens
+            (unwrap! (contract-call? .voting-token lock delegator-balance tx-sender) ERR-INSUFFICIENT-BALANCE)
+
+            ;; Track the locked tokens
+            (map-set delegation-locks
+                { delegator: tx-sender }
+                {
+                    locked-amount: delegator-balance,
+                    locked-at: stacks-block-time
+                }
             )
             ;; Create delegation
             (map-set delegations
@@ -171,6 +196,7 @@
                 event: "vote-delegated",
                 delegator: tx-sender,
                 delegate: delegatee,
+                amount-locked: delegator-balance,
                 timestamp: stacks-block-time,
                 expires-at: expires-at
             })
@@ -184,6 +210,7 @@
     (let
         (
             (delegation (unwrap! (map-get? delegations { delegator: tx-sender }) ERR-NOT-DELEGATED))
+            (lock-info (unwrap! (map-get? delegation-locks { delegator: tx-sender }) ERR-NOT-DELEGATED))
         )
         (asserts! (get active delegation) ERR-NOT-DELEGATED)
 
@@ -191,7 +218,14 @@
             (
                 (delegatee (get delegate delegation))
                 (history-index (- (default-to u1 (map-get? delegation-count { delegator: tx-sender })) u1))
+                (locked-amount (get locked-amount lock-info))
             )
+            ;; Unlock the delegator's tokens
+            (unwrap! (contract-call? .voting-token unlock locked-amount tx-sender) ERR-NOT-AUTHORIZED)
+
+            ;; Remove lock record
+            (map-delete delegation-locks { delegator: tx-sender })
+
             ;; Mark delegation as inactive
             (map-set delegations
                 { delegator: tx-sender }
@@ -226,6 +260,7 @@
                 event: "delegation-revoked",
                 delegator: tx-sender,
                 delegate: delegatee,
+                amount-unlocked: locked-amount,
                 timestamp: stacks-block-time
             })
             (ok true)
