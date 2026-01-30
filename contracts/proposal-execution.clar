@@ -19,8 +19,10 @@
 (define-constant ERR-TRANSFER-FAILED (err u308))
 
 ;; Data variables
-(define-data-var treasury-balance uint u0)
+(define-data-var treasury-balance uint u0)  ;; Tracks balance for accounting
 (define-data-var total-executed uint u0)
+(define-data-var total-deposits uint u0)
+(define-data-var total-withdrawals uint u0)
 
 ;; Data maps
 
@@ -88,6 +90,56 @@
 )
 
 ;; Public functions
+
+;; Deposit STX into treasury
+(define-public (deposit-to-treasury (amount uint))
+    (begin
+        (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+
+        ;; Transfer STX from sender to contract owner (treasury)
+        (try! (stx-transfer? amount tx-sender CONTRACT-OWNER))
+
+        ;; Update treasury balance tracking
+        (var-set treasury-balance (+ (var-get treasury-balance) amount))
+        (var-set total-deposits (+ (var-get total-deposits) amount))
+
+        (print {
+            event: "treasury-deposit",
+            depositor: tx-sender,
+            amount: amount,
+            new-balance: (var-get treasury-balance),
+            timestamp: stacks-block-time
+        })
+        (ok true)
+    )
+)
+
+;; Withdraw STX from treasury (admin only)
+(define-public (withdraw-from-treasury (amount uint) (recipient principal))
+    (begin
+        ;; Check admin access
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
+        (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+        (asserts! (>= (var-get treasury-balance) amount) ERR-INSUFFICIENT-TREASURY)
+
+        ;; Note: Actual STX transfer would be done by CONTRACT-OWNER separately
+        ;; This function tracks the withdrawal authorization
+
+        ;; Update treasury balance tracking
+        (var-set treasury-balance (- (var-get treasury-balance) amount))
+        (var-set total-withdrawals (+ (var-get total-withdrawals) amount))
+
+        (print {
+            event: "treasury-withdrawal-authorized",
+            admin: tx-sender,
+            recipient: recipient,
+            amount: amount,
+            new-balance: (var-get treasury-balance),
+            timestamp: stacks-block-time
+        })
+        (ok true)
+    )
+)
 
 ;; Queue proposal for execution (only contract owner or authorized)
 (define-public (queue-proposal (proposal-id uint) (action-type (string-ascii 50)) (recipient (optional principal)) (amount uint))
@@ -208,42 +260,6 @@
     )
 )
 
-;; Deposit to treasury
-(define-public (deposit-to-treasury (amount uint))
-    (begin
-        (asserts! (> amount u0) ERR-INVALID-AMOUNT)
-
-        ;; Track deposit (actual STX transfer would be handled off-chain or separately)
-        (var-set treasury-balance (+ (var-get treasury-balance) amount))
-
-        (let
-            (
-                (tx-id (var-get next-tx-id))
-            )
-            (var-set next-tx-id (+ tx-id u1))
-
-            (map-set treasury-transactions
-                { tx-id: tx-id }
-                {
-                    proposal-id: u0,
-                    amount: amount,
-                    recipient: tx-sender,
-                    timestamp: stacks-block-time,            ;; Clarity 4: Unix timestamp
-                    tx-type: "deposit"
-                }
-            )
-
-            (print {
-                event: "treasury-deposit",
-                tx-id: tx-id,
-                amount: amount,
-                depositor: tx-sender,
-                timestamp: stacks-block-time
-            })
-            (ok true)
-        )
-    )
-)
 
 ;; Trait implementation: get-execution-status
 (define-read-only (get-execution-status (proposal-id uint))
