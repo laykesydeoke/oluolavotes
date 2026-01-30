@@ -256,7 +256,8 @@
 ;; Update voter reputation (admin function)
 (define-public (update-reputation (voter principal) (score-change int) (reason (string-ascii 50)))
     (begin
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        ;; Check admin access via access-control
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
 
         (let
             (
