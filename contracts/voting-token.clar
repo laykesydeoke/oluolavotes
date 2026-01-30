@@ -109,15 +109,21 @@
 ;; Governance-specific functions
 
 ;; Purchase tokens with STX (1 STX = 1000 tokens)
+;; Post-condition: STX must be transferred before tokens are minted
 (define-public (buy-tokens (stx-amount uint))
     (let
         (
             (token-amount (* stx-amount u1000))
+            (sender-stx-before (stx-get-balance tx-sender))
         )
         (asserts! (> stx-amount u0) ERR-INVALID-AMOUNT)
+        (asserts! (>= sender-stx-before stx-amount) ERR-INSUFFICIENT-BALANCE)
 
         ;; Transfer STX from buyer to treasury
         (try! (stx-transfer? stx-amount tx-sender TREASURY-ADDRESS))
+
+        ;; Post-condition check: ensure STX was transferred
+        (asserts! (is-eq (stx-get-balance tx-sender) (- sender-stx-before stx-amount)) ERR-TRANSFER-FAILED)
 
         ;; Mint tokens to buyer
         (map-set balances tx-sender (+ (default-to u0 (map-get? balances tx-sender)) token-amount))

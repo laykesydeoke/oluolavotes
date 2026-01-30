@@ -92,12 +92,22 @@
 ;; Public functions
 
 ;; Deposit STX into treasury
+;; Post-condition: STX balance must increase
 (define-public (deposit-to-treasury (amount uint))
-    (begin
+    (let
+        (
+            (sender-balance-before (stx-get-balance tx-sender))
+            (treasury-balance-before (stx-get-balance CONTRACT-OWNER))
+        )
         (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+        (asserts! (>= sender-balance-before amount) ERR-INSUFFICIENT-TREASURY)
 
         ;; Transfer STX from sender to contract owner (treasury)
         (try! (stx-transfer? amount tx-sender CONTRACT-OWNER))
+
+        ;; Post-condition: verify balances changed correctly
+        (asserts! (is-eq (stx-get-balance tx-sender) (- sender-balance-before amount)) ERR-TRANSFER-FAILED)
+        (asserts! (is-eq (stx-get-balance CONTRACT-OWNER) (+ treasury-balance-before amount)) ERR-TRANSFER-FAILED)
 
         ;; Update treasury balance tracking
         (var-set treasury-balance (+ (var-get treasury-balance) amount))
