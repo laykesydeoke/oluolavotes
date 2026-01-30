@@ -1,6 +1,9 @@
 ;; Voting Analytics - Participation & Reputation Tracking (Clarity 4)
 ;; This contract tracks voter participation, reputation, and generates analytics
 
+;; Traits (will be enabled after trait contracts deployed)
+;; (impl-trait .analytics-trait.analytics-trait)
+
 ;; Constants
 (define-constant CONTRACT-OWNER tx-sender)
 
@@ -296,6 +299,60 @@
             (ok true)
         )
     )
+)
+
+;; Trait implementation: record-proposal
+(define-public (record-proposal (proposal-id uint) (proposer principal))
+    (record-proposal-creation proposer proposal-id)
+)
+
+;; Trait implementation: get-participation-rate
+(define-read-only (get-participation-rate (proposal-id uint))
+    (match (map-get? proposal-participation { proposal-id: proposal-id })
+        participation (ok (get participation-rate participation))
+        (ok u0)
+    )
+)
+
+
+;; Trait implementation: get-proposal-analytics
+(define-read-only (get-proposal-analytics (proposal-id uint))
+    (match (map-get? proposal-participation { proposal-id: proposal-id })
+        participation (ok {
+            total-votes: (get total-voters participation),
+            unique-voters: (get total-voters participation),
+            average-vote-power: u1,
+            time-to-quorum: u0
+        })
+        (ok {
+            total-votes: u0,
+            unique-voters: u0,
+            average-vote-power: u0,
+            time-to-quorum: u0
+        })
+    )
+)
+
+;; Trait implementation: get-governance-health
+(define-read-only (get-governance-health)
+    (ok {
+        active-proposals: (var-get total-proposals),
+        total-participation: (var-get total-votes-cast),
+        average-quorum-time: u0,
+        execution-success-rate: u0
+    })
+)
+
+;; Trait implementation: get-top-voters
+(define-read-only (get-top-voters (limit uint))
+    ;; Simplified: return empty list (would need leaderboard sorting)
+    (ok (list))
+)
+
+;; Trait implementation: get-voting-trends
+(define-read-only (get-voting-trends (start-block uint) (end-block uint))
+    ;; Simplified: return empty list (would need time-series data)
+    (ok (list))
 )
 
 ;; End proposal voting and calculate final participation
