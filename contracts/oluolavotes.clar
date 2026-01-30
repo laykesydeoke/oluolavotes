@@ -261,7 +261,10 @@
             (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
         )
         (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
+
+        ;; Finalize participation tracking in analytics
+        (unwrap-panic (contract-call? .voting-analytics finalize-proposal-participation proposal-id u100))
 
         (let
             (
