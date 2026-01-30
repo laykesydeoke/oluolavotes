@@ -75,9 +75,6 @@
     { depositor: principal, amount: uint, refunded: bool }
 )
 
-;; Reentrancy guard
-(define-data-var reentrancy-guard bool false)
-
 ;; Read-only functions
 
 ;; Retrieves information about a specific proposal
@@ -180,10 +177,6 @@
             (title-length (len title))
             (description-length (len description))
         )
-        ;; Reentrancy guard
-        (asserts! (not (var-get reentrancy-guard)) ERR-NOT-AUTHORIZED)
-        (var-set reentrancy-guard true)
-
         ;; Check if user can create proposals via access control
         (asserts! (unwrap-panic (contract-call? .access-control can-create-proposal tx-sender)) ERR-NOT-AUTHORIZED)
 
@@ -238,9 +231,6 @@
                 end-time: end-time,
                 deposit: PROPOSAL-DEPOSIT
             })
-
-            ;; Release reentrancy guard
-            (var-set reentrancy-guard false)
             (ok new-proposal-id)
         )
         )
@@ -393,10 +383,6 @@
             (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
             (escrow (unwrap! (map-get? escrowed-tokens { proposal-id: proposal-id, voter: tx-sender }) ERR-NOT-FOUND))
         )
-        ;; Reentrancy guard
-        (asserts! (not (var-get reentrancy-guard)) ERR-NOT-AUTHORIZED)
-        (var-set reentrancy-guard true)
-
         ;; Ensure voting has ended
         (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
 
@@ -413,9 +399,6 @@
             amount: (get amount escrow),
             timestamp: stacks-block-time
         })
-
-        ;; Release reentrancy guard
-        (var-set reentrancy-guard false)
         (ok true)
     )
 )
@@ -449,27 +432,17 @@
 
 ;; Batch release escrow for multiple proposals
 (define-public (batch-release-escrow (proposal-ids (list 10 uint)))
-    (begin
-        ;; Reentrancy guard
-        (asserts! (not (var-get reentrancy-guard)) ERR-NOT-AUTHORIZED)
-        (var-set reentrancy-guard true)
-
-        ;; Release escrow for each proposal
-        (let
-            (
-                (results (map release-escrow-internal proposal-ids))
-            )
-            (print {
-                event: "batch-escrow-released",
-                voter: tx-sender,
-                proposal-count: (len proposal-ids),
-                timestamp: stacks-block-time
-            })
-
-            ;; Release reentrancy guard
-            (var-set reentrancy-guard false)
-            (ok true)
+    (let
+        (
+            (results (map release-escrow-internal proposal-ids))
         )
+        (print {
+            event: "batch-escrow-released",
+            voter: tx-sender,
+            proposal-count: (len proposal-ids),
+            timestamp: stacks-block-time
+        })
+        (ok true)
     )
 )
 
@@ -480,10 +453,6 @@
             (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
             (deposit (unwrap! (map-get? proposal-deposits { proposal-id: proposal-id }) ERR-NOT-FOUND))
         )
-        ;; Reentrancy guard
-        (asserts! (not (var-get reentrancy-guard)) ERR-NOT-AUTHORIZED)
-        (var-set reentrancy-guard true)
-
         ;; Ensure voting has ended
         (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
         (asserts! (not (get refunded deposit)) ERR-ALREADY-EXECUTED)
@@ -518,9 +487,6 @@
                 })
             )
         )
-
-        ;; Release reentrancy guard
-        (var-set reentrancy-guard false)
         (ok true)
     )
 )

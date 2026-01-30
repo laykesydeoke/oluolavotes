@@ -20,6 +20,7 @@
 (define-constant ERR-ALREADY-VOTED (err u604))
 (define-constant ERR-INVALID-WEIGHT (err u605))
 (define-constant ERR-INVALID-RANKING (err u606))
+(define-constant ERR-INSUFFICIENT-BALANCE (err u607))
 
 ;; Data maps
 
@@ -177,6 +178,14 @@
         (asserts! (is-none existing-vote) ERR-ALREADY-VOTED)
         (asserts! (and (>= weight (get min-weight strategy)) (<= weight (get max-weight strategy))) ERR-INVALID-WEIGHT)
 
+        ;; Verify voter has sufficient token balance
+        (let
+            (
+                (voter-balance (unwrap! (contract-call? .voting-token get-balance tx-sender) ERR-INSUFFICIENT-BALANCE))
+            )
+            (asserts! (>= voter-balance weight) ERR-INSUFFICIENT-BALANCE)
+        )
+
         ;; Record vote
         (map-set weighted-votes
             { proposal-id: proposal-id, voter: tx-sender }
@@ -225,6 +234,14 @@
         (asserts! (is-eq (get strategy-type strategy) STRATEGY-QUADRATIC) ERR-INVALID-STRATEGY)
         (asserts! (is-none existing-vote) ERR-ALREADY-VOTED)
         (asserts! (> credits u0) ERR-INVALID-WEIGHT)
+
+        ;; Verify voter has sufficient token balance for credits
+        (let
+            (
+                (voter-balance (unwrap! (contract-call? .voting-token get-balance tx-sender) ERR-INSUFFICIENT-BALANCE))
+            )
+            (asserts! (>= voter-balance credits) ERR-INSUFFICIENT-BALANCE)
+        )
 
         ;; Record vote
         (map-set quadratic-votes

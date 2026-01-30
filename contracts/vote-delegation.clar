@@ -101,6 +101,16 @@
     (ok (default-to u0 (map-get? delegation-count { delegator: delegator })))
 )
 
+;; Get delegation lock info
+(define-read-only (get-delegation-lock (delegator principal))
+    (ok (map-get? delegation-locks { delegator: delegator }))
+)
+
+;; Check if tokens are locked for delegation
+(define-read-only (has-locked-delegation (delegator principal))
+    (ok (is-some (map-get? delegation-locks { delegator: delegator })))
+)
+
 ;; Public functions
 
 ;; Delegate voting power to another user
