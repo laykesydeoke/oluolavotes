@@ -101,6 +101,9 @@
         ;; Check for circular delegation
         (asserts! (not (unwrap! (is-delegated delegatee) ERR-INVALID-DELEGATE)) ERR-CIRCULAR-DELEGATION)
 
+        ;; Verify delegatee has voting tokens
+        (asserts! (> (unwrap-panic (contract-call? .voting-token get-balance delegatee)) u0) ERR-INVALID-DELEGATE)
+
         ;; Check if already delegated
         (try! (match (map-get? delegations { delegator: tx-sender })
             existing-delegation
