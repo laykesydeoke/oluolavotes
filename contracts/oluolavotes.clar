@@ -141,6 +141,11 @@
     (ok (map-get? proposal-deposits { proposal-id: proposal-id }))
 )
 
+;; Check if voter has escrow for proposal
+(define-read-only (has-escrow (proposal-id uint) (voter principal))
+    (ok (is-some (map-get? escrowed-tokens { proposal-id: proposal-id, voter: voter })))
+)
+
 ;; Translates error codes into human-readable messages
 ;; @param error-code The error code to translate
 ;; @returns (string-utf8 50) The corresponding error message
