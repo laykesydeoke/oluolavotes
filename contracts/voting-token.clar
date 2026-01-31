@@ -298,6 +298,13 @@
                 { holder: holder, block: block }
                 current-balance
             )
+            (print {
+                event: "snapshot-created",
+                holder: holder,
+                block: block,
+                balance: current-balance,
+                timestamp: stacks-block-time
+            })
             (ok true)
         )
     )
