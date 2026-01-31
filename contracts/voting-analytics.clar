@@ -129,6 +129,22 @@
     )
 )
 
+;; Get voter's last activity time
+(define-read-only (get-last-activity (voter principal))
+    (match (map-get? voter-stats { voter: voter })
+        stats (ok (get last-vote stats))
+        (ok u0)
+    )
+)
+
+;; Check if voter voted recently (within 30 days)
+(define-read-only (is-recent-voter (voter principal))
+    (match (map-get? voter-stats { voter: voter })
+        stats (ok (>= (get last-vote stats) (- stacks-block-time u2592000)))
+        (ok false)
+    )
+)
+
 ;; Public functions
 
 ;; Record vote (should be called by voting contract)
