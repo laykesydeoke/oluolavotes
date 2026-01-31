@@ -46,6 +46,16 @@
     uint
 )
 
+;; Track user activity
+(define-map user-activity
+    { user: principal }
+    {
+        last-action: (string-ascii 50),
+        last-action-at: uint,
+        action-count: uint
+    }
+)
+
 ;; Initialize default roles
 (map-set roles
     { role-id: ROLE-ADMIN }
@@ -270,7 +280,14 @@
 
 ;; Helper function for batch granting
 (define-private (grant-role-helper (user principal))
-    (begin
+    (let
+        (
+            (current-activity (map-get? user-activity { user: user }))
+            (current-count (match current-activity
+                activity (get action-count activity)
+                u0
+            ))
+        )
         (map-set user-roles
             { user: user, role: ROLE-VOTER }
             {
@@ -279,6 +296,19 @@
                 active: true
             }
         )
+        (map-set user-activity
+            { user: user }
+            {
+                last-action: "role-granted",
+                last-action-at: stacks-block-time,
+                action-count: (+ current-count u1)
+            }
+        )
         true
     )
+)
+
+;; Get user activity
+(define-read-only (get-user-activity (user principal))
+    (ok (map-get? user-activity { user: user }))
 )
