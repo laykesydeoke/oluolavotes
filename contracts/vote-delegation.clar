@@ -16,6 +16,9 @@
 (define-constant ERR-SELF-DELEGATION (err u206))
 (define-constant ERR-INSUFFICIENT-BALANCE (err u207))
 
+;; Data variables
+(define-data-var total-active-delegations uint u0)
+
 ;; Data maps
 
 ;; Delegation records with Clarity 4 timestamps
@@ -111,6 +114,11 @@
     (ok (is-some (map-get? delegation-locks { delegator: delegator })))
 )
 
+;; Get total active delegations
+(define-read-only (get-total-delegations)
+    (ok (var-get total-active-delegations))
+)
+
 ;; Public functions
 
 ;; Delegate voting power to another user
@@ -201,6 +209,7 @@
             )
 
             (map-set delegation-count { delegator: tx-sender } (+ history-index u1))
+            (var-set total-active-delegations (+ (var-get total-active-delegations) u1))
 
             (print {
                 event: "vote-delegated",
@@ -265,6 +274,8 @@
                     )
                 true
             )
+
+            (var-set total-active-delegations (- (var-get total-active-delegations) u1))
 
             (print {
                 event: "delegation-revoked",
