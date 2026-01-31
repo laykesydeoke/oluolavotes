@@ -24,6 +24,7 @@
 (define-data-var total-deposits uint u0)
 (define-data-var total-withdrawals uint u0)
 (define-data-var queued-proposals uint u0)
+(define-data-var max-withdrawal-limit uint u1000000)
 
 ;; Data maps
 
@@ -146,6 +147,7 @@
         ;; Check admin access
         (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
         (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+        (asserts! (<= amount (var-get max-withdrawal-limit)) ERR-INVALID-AMOUNT)
         (asserts! (>= (var-get treasury-balance) amount) ERR-INSUFFICIENT-TREASURY)
 
         ;; Note: Actual STX transfer would be done by CONTRACT-OWNER separately
@@ -378,4 +380,24 @@
         })
         (ok true)
     )
+)
+
+;; Set withdrawal limit (admin only)
+(define-public (set-withdrawal-limit (new-limit uint))
+    (begin
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
+        (var-set max-withdrawal-limit new-limit)
+        (print {
+            event: "withdrawal-limit-updated",
+            new-limit: new-limit,
+            updated-by: tx-sender,
+            timestamp: stacks-block-time
+        })
+        (ok true)
+    )
+)
+
+;; Get withdrawal limit
+(define-read-only (get-withdrawal-limit)
+    (ok (var-get max-withdrawal-limit))
 )
