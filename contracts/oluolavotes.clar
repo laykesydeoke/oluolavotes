@@ -382,8 +382,19 @@
         (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
         (asserts! (<= new-quorum-bps u10000) ERR-INVALID-PROPOSAL)
         (var-set min-quorum-bps new-quorum-bps)
+        (print {
+            event: "quorum-updated",
+            new-quorum: new-quorum-bps,
+            updated-by: tx-sender,
+            timestamp: stacks-block-time
+        })
         (ok true)
     )
+)
+
+;; Get minimum quorum
+(define-read-only (get-min-quorum)
+    (ok (var-get min-quorum-bps))
 )
 
 ;; Release escrowed tokens after voting ends
