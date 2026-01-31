@@ -83,6 +83,18 @@
     )
 )
 
+;; Check if delegation has expired
+(define-read-only (is-delegation-expired (delegator principal))
+    (match (map-get? delegations { delegator: delegator })
+        delegation
+            (match (get expires-at delegation)
+                expiry-time (ok (>= stacks-block-time expiry-time))
+                (ok false)
+            )
+        (ok false)
+    )
+)
+
 ;; Get effective voting power (own + delegated)
 (define-read-only (get-effective-voting-power (voter principal))
     (let
