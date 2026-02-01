@@ -1,6 +1,9 @@
 ;; Voting Token - SIP-010 Governance Token (Clarity 4)
 ;; This contract implements a fungible token for governance voting
 
+;; Traits (will be enabled after trait contracts deployed)
+;; (impl-trait .token-trait.token-trait)
+
 ;; Constants
 (define-constant CONTRACT-OWNER tx-sender)
 (define-constant TOKEN-NAME "OluolaVote Token")
@@ -104,7 +107,8 @@
 ;; Mint new tokens (only contract owner)
 (define-public (mint (amount uint) (recipient principal))
     (begin
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        ;; Check admin access via access-control
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
         (asserts! (> amount u0) ERR-INVALID-AMOUNT)
 
         (map-set balances recipient (+ (default-to u0 (map-get? balances recipient)) amount))
@@ -133,40 +137,6 @@
     )
 )
 
-;; Burn tokens from sender's balance
-(define-public (burn (amount uint))
-    (let
-        (
-            (sender-balance (default-to u0 (map-get? balances tx-sender)))
-        )
-        (asserts! (> amount u0) ERR-INVALID-AMOUNT)
-        (asserts! (>= sender-balance amount) ERR-INSUFFICIENT-BALANCE)
-
-        (map-set balances tx-sender (- sender-balance amount))
-        (var-set total-supply (- (var-get total-supply) amount))
-
-        ;; Update token holder tracking
-        (map-set token-holders
-            { holder: tx-sender }
-            {
-                balance: (- sender-balance amount),
-                first-received: (match (map-get? token-holders { holder: tx-sender })
-                    holder-info (get first-received holder-info)
-                    stacks-block-time
-                ),
-                last-updated: stacks-block-time              ;; Clarity 4: Unix timestamp
-            }
-        )
-
-        (print {
-            event: "token-burned",
-            holder: tx-sender,
-            amount: amount,
-            timestamp: stacks-block-time
-        })
-        (ok true)
-    )
-)
 
 ;; Get voting power (same as balance for this implementation)
 (define-read-only (get-voting-power (account principal))
@@ -183,6 +153,84 @@
     (begin
         (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
         (var-set token-uri (some new-uri))
+        (ok true)
+    )
+)
+
+;; Trait implementation: Lock and unlock tokens
+(define-map locked-tokens principal uint)
+
+(define-public (lock (amount uint) (holder principal))
+    (let
+        (
+            (current-locked (default-to u0 (map-get? locked-tokens holder)))
+            (balance (default-to u0 (map-get? balances holder)))
+        )
+        (asserts! (>= balance (+ current-locked amount)) ERR-INSUFFICIENT-BALANCE)
+        (map-set locked-tokens holder (+ current-locked amount))
+        (ok true)
+    )
+)
+
+(define-public (unlock (amount uint) (holder principal))
+    (let
+        (
+            (current-locked (default-to u0 (map-get? locked-tokens holder)))
+        )
+        (asserts! (>= current-locked amount) ERR-INSUFFICIENT-BALANCE)
+        (map-set locked-tokens holder (- current-locked amount))
+        (ok true)
+    )
+)
+
+(define-read-only (get-locked-balance (holder principal))
+    (ok (default-to u0 (map-get? locked-tokens holder)))
+)
+
+;; Snapshot functions for voting power at specific block
+(define-map balance-snapshots { holder: principal, block: uint } uint)
+
+(define-read-only (get-balance-at (holder principal) (block uint))
+    (ok (default-to u0 (map-get? balance-snapshots { holder: holder, block: block })))
+)
+
+(define-read-only (get-total-supply-at (block uint))
+    ;; For simplicity, return current total supply
+    ;; In production, would need snapshot mechanism
+    (ok (var-get total-supply))
+)
+
+;; Update burn to match trait signature
+(define-public (burn (amount uint) (holder principal))
+    (let
+        (
+            (holder-balance (default-to u0 (map-get? balances holder)))
+        )
+        (asserts! (is-eq tx-sender holder) ERR-NOT-AUTHORIZED)
+        (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+        (asserts! (>= holder-balance amount) ERR-INSUFFICIENT-BALANCE)
+
+        (map-set balances holder (- holder-balance amount))
+        (var-set total-supply (- (var-get total-supply) amount))
+
+        (map-set token-holders
+            { holder: holder }
+            {
+                balance: (- holder-balance amount),
+                first-received: (match (map-get? token-holders { holder: holder })
+                    holder-info (get first-received holder-info)
+                    stacks-block-time
+                ),
+                last-updated: stacks-block-time
+            }
+        )
+
+        (print {
+            event: "token-burned",
+            holder: holder,
+            amount: amount,
+            timestamp: stacks-block-time
+        })
         (ok true)
     )
 )

@@ -1,6 +1,9 @@
 ;; Vote Delegation - Delegated Voting Power (Clarity 4)
 ;; This contract allows users to delegate their voting power to others
 
+;; Traits (will be enabled after trait contracts deployed)
+;; (impl-trait .delegation-trait.delegation-trait)
+
 ;; Constants
 (define-constant CONTRACT-OWNER tx-sender)
 
@@ -55,8 +58,8 @@
 )
 
 ;; Get delegated power received by a delegate
-(define-read-only (get-delegated-power (delegate principal))
-    (ok (map-get? delegated-power { delegate: delegate }))
+(define-read-only (get-delegated-power (delegatee principal))
+    (ok (map-get? delegated-power { delegate: delegatee }))
 )
 
 ;; Check if delegation is active
@@ -91,12 +94,15 @@
 ;; Public functions
 
 ;; Delegate voting power to another user
-(define-public (delegate-vote (delegate principal) (duration-seconds (optional uint)))
+(define-public (delegate-vote (delegatee principal) (duration-seconds (optional uint)))
     (begin
-        (asserts! (not (is-eq tx-sender delegate)) ERR-SELF-DELEGATION)
+        (asserts! (not (is-eq tx-sender delegatee)) ERR-SELF-DELEGATION)
 
         ;; Check for circular delegation
-        (asserts! (not (unwrap! (is-delegated delegate) ERR-INVALID-DELEGATE)) ERR-CIRCULAR-DELEGATION)
+        (asserts! (not (unwrap! (is-delegated delegatee) ERR-INVALID-DELEGATE)) ERR-CIRCULAR-DELEGATION)
+
+        ;; Verify delegatee has voting tokens
+        (asserts! (> (unwrap-panic (contract-call? .voting-token get-balance delegatee)) u0) ERR-INVALID-DELEGATE)
 
         ;; Check if already delegated
         (try! (match (map-get? delegations { delegator: tx-sender })
@@ -120,7 +126,7 @@
             (map-set delegations
                 { delegator: tx-sender }
                 {
-                    delegate: delegate,
+                    delegate: delegatee,
                     delegated-at: stacks-block-time,         ;; Clarity 4: Unix timestamp
                     expires-at: expires-at,
                     active: true
@@ -128,10 +134,10 @@
             )
 
             ;; Update delegated power for delegate
-            (match (map-get? delegated-power { delegate: delegate })
+            (match (map-get? delegated-power { delegate: delegatee })
                 existing-power
                     (map-set delegated-power
-                        { delegate: delegate }
+                        { delegate: delegatee }
                         {
                             delegator-count: (+ (get delegator-count existing-power) u1),
                             total-power: (+ (get total-power existing-power) u1),
@@ -140,7 +146,7 @@
                     )
                 ;; First delegation to this delegate
                 (map-set delegated-power
-                    { delegate: delegate }
+                    { delegate: delegatee }
                     {
                         delegator-count: u1,
                         total-power: u1,
@@ -153,7 +159,7 @@
             (map-set delegation-history
                 { delegator: tx-sender, index: history-index }
                 {
-                    delegate: delegate,
+                    delegate: delegatee,
                     delegated-at: stacks-block-time,
                     revoked-at: none
                 }
@@ -164,7 +170,7 @@
             (print {
                 event: "vote-delegated",
                 delegator: tx-sender,
-                delegate: delegate,
+                delegate: delegatee,
                 timestamp: stacks-block-time,
                 expires-at: expires-at
             })
@@ -183,7 +189,7 @@
 
         (let
             (
-                (delegate (get delegate delegation))
+                (delegatee (get delegate delegation))
                 (history-index (- (default-to u1 (map-get? delegation-count { delegator: tx-sender })) u1))
             )
             ;; Mark delegation as inactive
@@ -193,10 +199,10 @@
             )
 
             ;; Update delegated power for delegate
-            (match (map-get? delegated-power { delegate: delegate })
+            (match (map-get? delegated-power { delegate: delegatee })
                 existing-power
                     (map-set delegated-power
-                        { delegate: delegate }
+                        { delegate: delegatee }
                         {
                             delegator-count: (- (get delegator-count existing-power) u1),
                             total-power: (- (get total-power existing-power) u1),
@@ -219,13 +225,14 @@
             (print {
                 event: "delegation-revoked",
                 delegator: tx-sender,
-                delegate: delegate,
+                delegate: delegatee,
                 timestamp: stacks-block-time
             })
             (ok true)
         )
     )
 )
+
 
 ;; Check and expire delegations (can be called by anyone)
 (define-public (expire-delegation (delegator principal))
@@ -242,7 +249,7 @@
 
                     (let
                         (
-                            (delegate (get delegate delegation))
+                            (delegatee (get delegate delegation))
                         )
                         ;; Mark as inactive
                         (map-set delegations
@@ -251,10 +258,10 @@
                         )
 
                         ;; Update delegated power
-                        (match (map-get? delegated-power { delegate: delegate })
+                        (match (map-get? delegated-power { delegate: delegatee })
                             existing-power
                                 (map-set delegated-power
-                                    { delegate: delegate }
+                                    { delegate: delegatee }
                                     {
                                         delegator-count: (- (get delegator-count existing-power) u1),
                                         total-power: (- (get total-power existing-power) u1),
@@ -267,7 +274,7 @@
                         (print {
                             event: "delegation-expired",
                             delegator: delegator,
-                            delegate: delegate,
+                            delegate: delegatee,
                             timestamp: stacks-block-time
                         })
                         (ok true)
@@ -276,4 +283,82 @@
             ERR-NOT-AUTHORIZED  ;; No expiry set
         )
     )
+)
+
+;; Trait implementation: delegate
+(define-public (delegate (delegatee principal))
+    (begin
+        (asserts! (not (is-eq tx-sender delegatee)) ERR-SELF-DELEGATION)
+        (asserts! (not (unwrap! (is-delegated delegatee) ERR-INVALID-DELEGATE)) ERR-CIRCULAR-DELEGATION)
+        (try! (match (map-get? delegations { delegator: tx-sender })
+            existing-delegation
+                (if (get active existing-delegation)
+                    ERR-ALREADY-DELEGATED
+                    (ok true)
+                )
+            (ok true)
+        ))
+        (map-set delegations
+            { delegator: tx-sender }
+            {
+                delegate: delegatee,
+                delegated-at: stacks-block-time,
+                expires-at: none,
+                active: true
+            }
+        )
+        (match (map-get? delegated-power { delegate: delegatee })
+            existing-power
+                (map-set delegated-power
+                    { delegate: delegatee }
+                    {
+                        delegator-count: (+ (get delegator-count existing-power) u1),
+                        total-power: (+ (get total-power existing-power) u1),
+                        last-updated: stacks-block-time
+                    }
+                )
+            (map-set delegated-power
+                { delegate: delegatee }
+                {
+                    delegator-count: u1,
+                    total-power: u1,
+                    last-updated: stacks-block-time
+                }
+            )
+        )
+        (ok true)
+    )
+)
+
+;; Trait implementation: undelegate
+(define-public (undelegate)
+    (let
+        (
+            (delegation (unwrap! (map-get? delegations { delegator: tx-sender }) ERR-NOT-DELEGATED))
+        )
+        (asserts! (get active delegation) ERR-NOT-DELEGATED)
+        (map-set delegations
+            { delegator: tx-sender }
+            (merge delegation { active: false })
+        )
+        (ok true)
+    )
+)
+
+;; Trait implementation: get-delegators
+(define-read-only (get-delegators (delegatee principal))
+    (ok (list))
+)
+
+;; Trait implementation: is-delegating
+(define-read-only (is-delegating (delegator principal))
+    (match (map-get? delegations { delegator: delegator })
+        delegation (ok (get active delegation))
+        (ok false)
+    )
+)
+
+;; Trait implementation: delegate-for-proposal
+(define-public (delegate-for-proposal (proposal-id uint) (delegatee principal))
+    (delegate delegatee)
 )

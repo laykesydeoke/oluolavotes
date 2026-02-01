@@ -1,6 +1,9 @@
 ;; Decentralized Voting System - Clarity 4
 ;; This contract implements a decentralized voting system with time-based voting periods
 
+;; Traits (will be enabled after trait contracts deployed)
+;; (impl-trait .governance-trait.governance-trait)
+
 ;; Constants
 
 ;; The principal who deployed the contract and has administrative privileges
@@ -25,7 +28,7 @@
 (define-map proposals
     { proposal-id: uint }
     {
-        title: (string-utf8 50),
+        title: (string-utf8 100),
         description: (string-utf8 500),
         proposer: principal,
         votes-for: uint,
@@ -61,7 +64,20 @@
 ;; @param proposal-id The unique identifier of the proposal
 ;; @returns (response {...} uint) The proposal data or an error if not found
 (define-read-only (get-proposal (proposal-id uint))
-    (ok (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
+    (match (map-get? proposals { proposal-id: proposal-id })
+        proposal (ok {
+            proposer: (get proposer proposal),
+            title: (get title proposal),
+            description: (get description proposal),
+            start-block: (get created-at proposal),
+            end-block: (get end-time proposal),
+            votes-for: (get votes-for proposal),
+            votes-against: (get votes-against proposal),
+            votes-abstain: u0,
+            executed: (get executed proposal)
+        })
+        ERR-NOT-FOUND
+    )
 )
 
 ;; Retrieves a user's vote for a specific proposal
@@ -135,16 +151,19 @@
 ;; Public functions
 
 ;; Creates a new proposal
-;; @param title The title of the proposal (max 50 characters)
+;; @param title The title of the proposal (max 100 characters)
 ;; @param description The description of the proposal (max 500 characters)
 ;; @returns (response uint uint) The new proposal ID or an error
-(define-public (create-proposal (title (string-utf8 50)) (description (string-utf8 500)))
+(define-public (create-proposal (title (string-utf8 100)) (description (string-utf8 500)))
     (let
         (
             (title-length (len title))
             (description-length (len description))
         )
-        (asserts! (and (> title-length u0) (<= title-length u50)) ERR-INVALID-TITLE)
+        ;; Check if user can create proposals via access control
+        (asserts! (unwrap-panic (contract-call? .access-control can-create-proposal tx-sender)) ERR-NOT-AUTHORIZED)
+
+        (asserts! (and (> title-length u0) (<= title-length u100)) ERR-INVALID-TITLE)
         (asserts! (and (> description-length u0) (<= description-length u500)) ERR-INVALID-DESCRIPTION)
         (let
             (
@@ -167,6 +186,10 @@
                 }
             )
             (var-set proposal-count new-proposal-id)
+
+            ;; Record proposal creation in analytics contract
+            (unwrap-panic (contract-call? .voting-analytics record-proposal-creation tx-sender new-proposal-id))
+
             (print {
                 event: "proposal-created",
                 proposal-id: new-proposal-id,
@@ -189,6 +212,9 @@
             (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
             (existing-vote (map-get? votes { voter: tx-sender, proposal-id: proposal-id }))
         )
+        ;; Check if user can vote via access control
+        (asserts! (unwrap-panic (contract-call? .access-control can-vote tx-sender)) ERR-NOT-AUTHORIZED)
+
         (asserts! (< stacks-block-time (get end-time proposal)) ERR-VOTING-ENDED)
         (asserts! (is-none existing-vote) ERR-ALREADY-VOTED)
 
@@ -209,6 +235,10 @@
                 }
             )
         )
+
+        ;; Record vote in analytics contract
+        (unwrap-panic (contract-call? .voting-analytics record-vote tx-sender proposal-id))
+
         (print {
             event: "vote-cast",
             proposal-id: proposal-id,
@@ -231,7 +261,10 @@
             (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
         )
         (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
+
+        ;; Finalize participation tracking in analytics
+        (unwrap-panic (contract-call? .voting-analytics finalize-proposal-participation proposal-id u100))
 
         (let
             (
@@ -252,6 +285,31 @@
             (ok true)
         )
     )
+)
+
+;; Trait implementation: has-voted
+(define-read-only (has-voted (proposal-id uint) (voter principal))
+    (match (map-get? votes { voter: voter, proposal-id: proposal-id })
+        vote-data (ok true)
+        (ok false)
+    )
+)
+
+;; Trait implementation: get-voting-power
+(define-read-only (get-voting-power (voter principal))
+    ;; Get voting power from token contract plus delegated power
+    (let
+        (
+            (token-balance (unwrap-panic (contract-call? .voting-token get-balance voter)))
+            (delegated-power (unwrap-panic (contract-call? .vote-delegation get-effective-voting-power voter)))
+        )
+        (ok (+ token-balance delegated-power))
+    )
+)
+
+;; Trait implementation: is-proposal-active
+(define-read-only (is-proposal-active (proposal-id uint))
+    (is-voting-active proposal-id)
 )
 
 ;; Update minimum quorum requirement

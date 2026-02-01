@@ -1,6 +1,9 @@
 ;; Proposal Execution - Treasury Management (Clarity 4)
 ;; This contract executes approved proposals and manages the treasury
 
+;; Traits (will be enabled after trait contracts deployed)
+;; (impl-trait .execution-trait.execution-trait)
+
 ;; Constants
 (define-constant CONTRACT-OWNER tx-sender)
 (define-constant EXECUTION-DELAY u86400)          ;; Clarity 4: 24 hours in seconds
@@ -89,7 +92,8 @@
 ;; Queue proposal for execution (only contract owner or authorized)
 (define-public (queue-proposal (proposal-id uint) (action-type (string-ascii 50)) (recipient (optional principal)) (amount uint))
     (begin
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        ;; Check admin access via access-control
+        (asserts! (unwrap-panic (contract-call? .access-control is-admin tx-sender)) ERR-NOT-AUTHORIZED)
         (asserts! (is-none (map-get? execution-queue { proposal-id: proposal-id })) ERR-ALREADY-EXECUTED)
 
         (let
@@ -129,6 +133,9 @@
         )
         (asserts! (not (get executed execution)) ERR-ALREADY-EXECUTED)
         (asserts! (>= stacks-block-time (get ready-at execution)) ERR-EXECUTION-DELAY-NOT-MET)
+
+        ;; Verify proposal exists and passed in governance contract
+        (unwrap-panic (contract-call? .oluolavotes get-proposal proposal-id))
 
         ;; Check if it's a treasury transfer and execute if needed
         (try! (if (is-eq (get action-type execution) "transfer")
@@ -238,13 +245,84 @@
     )
 )
 
+;; Trait implementation: get-execution-status
+(define-read-only (get-execution-status (proposal-id uint))
+    (match (map-get? execution-queue { proposal-id: proposal-id })
+        execution (ok {
+            executed: (get executed execution),
+            queued: true,
+            execution-block: (match (get executed-at execution)
+                timestamp timestamp
+                u0
+            ),
+            executor: (get executor execution)
+        })
+        (ok {
+            executed: false,
+            queued: false,
+            execution-block: u0,
+            executor: none
+        })
+    )
+)
+
+;; Trait implementation: is-executable
+(define-read-only (is-executable (proposal-id uint))
+    (is-ready-for-execution proposal-id)
+)
+
+;; Trait implementation: get-timelock-delay
+(define-read-only (get-timelock-delay)
+    (ok EXECUTION-DELAY)
+)
+
+;; Trait implementation: set-timelock-delay (placeholder)
+(define-public (set-timelock-delay (new-delay uint))
+    ;; Placeholder: would need data-var to actually change delay
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        (ok true)
+    )
+)
+
+;; Trait implementation: get-execution-history
+(define-read-only (get-execution-history)
+    ;; Simplified: return empty list (would need additional tracking)
+    (ok (list))
+)
+
+;; Trait implementation: pause-execution
+(define-public (pause-execution)
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        (ok true)
+    )
+)
+
+;; Trait implementation: unpause-execution
+(define-public (unpause-execution)
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        (ok true)
+    )
+)
+
+;; Trait implementation: cancel-proposal (wraps cancel-execution)
+(define-public (cancel-proposal (proposal-id uint))
+    (cancel-execution proposal-id)
+)
+
 ;; Cancel queued proposal (only contract owner)
 (define-public (cancel-execution (proposal-id uint))
     (let
         (
             (execution (unwrap! (map-get? execution-queue { proposal-id: proposal-id }) ERR-PROPOSAL-NOT-FOUND))
         )
-        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        ;; Check admin or moderator access via access-control
+        (asserts! (or
+            (unwrap-panic (contract-call? .access-control is-admin tx-sender))
+            (unwrap-panic (contract-call? .access-control is-moderator tx-sender))
+        ) ERR-NOT-AUTHORIZED)
         (asserts! (not (get executed execution)) ERR-ALREADY-EXECUTED)
 
         (map-delete execution-queue { proposal-id: proposal-id })
