@@ -12,6 +12,9 @@
 ;; The duration of the voting period in seconds (Clarity 4: ~7 days)
 (define-constant VOTING-PERIOD u604800)
 
+;; Proposal deposit requirement (1000 tokens)
+(define-constant PROPOSAL-DEPOSIT u1000)
+
 ;; Error codes
 (define-constant ERR-NOT-FOUND (err u100))
 (define-constant ERR-VOTING-ENDED (err u101))
@@ -21,6 +24,8 @@
 (define-constant ERR-INVALID-TITLE (err u105))
 (define-constant ERR-INVALID-DESCRIPTION (err u106))
 (define-constant ERR-INVALID-PROPOSAL (err u107))
+(define-constant ERR-INSUFFICIENT-BALANCE (err u108))
+(define-constant ERR-ALREADY-EXECUTED (err u109))
 
 ;; Data maps
 
@@ -57,6 +62,18 @@
 
 ;; Minimum quorum percentage (in basis points, 1000 = 10%)
 (define-data-var min-quorum-bps uint u1000)
+
+;; Escrow tracking
+(define-map escrowed-tokens
+    { proposal-id: uint, voter: principal }
+    { amount: uint, locked-at: uint }
+)
+
+;; Proposal deposits (refunded if proposal passes, burned if rejected)
+(define-map proposal-deposits
+    { proposal-id: uint }
+    { depositor: principal, amount: uint, refunded: bool }
+)
 
 ;; Read-only functions
 
@@ -114,6 +131,21 @@
     )
 )
 
+;; Get escrow info for a voter
+(define-read-only (get-escrow-info (proposal-id uint) (voter principal))
+    (ok (map-get? escrowed-tokens { proposal-id: proposal-id, voter: voter }))
+)
+
+;; Get proposal deposit info
+(define-read-only (get-deposit-info (proposal-id uint))
+    (ok (map-get? proposal-deposits { proposal-id: proposal-id }))
+)
+
+;; Check if voter has escrow for proposal
+(define-read-only (has-escrow (proposal-id uint) (voter principal))
+    (ok (is-some (map-get? escrowed-tokens { proposal-id: proposal-id, voter: voter })))
+)
+
 ;; Translates error codes into human-readable messages
 ;; @param error-code The error code to translate
 ;; @returns (string-utf8 50) The corresponding error message
@@ -165,6 +197,16 @@
 
         (asserts! (and (> title-length u0) (<= title-length u100)) ERR-INVALID-TITLE)
         (asserts! (and (> description-length u0) (<= description-length u500)) ERR-INVALID-DESCRIPTION)
+
+        ;; Check user has enough tokens for deposit
+        (let
+            (
+                (user-balance (unwrap-panic (contract-call? .voting-token get-balance tx-sender)))
+            )
+            (asserts! (>= user-balance PROPOSAL-DEPOSIT) ERR-INSUFFICIENT-BALANCE)
+
+            ;; Lock deposit tokens
+            (unwrap-panic (contract-call? .voting-token lock PROPOSAL-DEPOSIT tx-sender))
         (let
             (
                 (new-proposal-id (+ (var-get proposal-count) u1))
@@ -187,6 +229,12 @@
             )
             (var-set proposal-count new-proposal-id)
 
+            ;; Track deposit
+            (map-set proposal-deposits
+                { proposal-id: new-proposal-id }
+                { depositor: tx-sender, amount: PROPOSAL-DEPOSIT, refunded: false }
+            )
+
             ;; Record proposal creation in analytics contract
             (unwrap-panic (contract-call? .voting-analytics record-proposal-creation tx-sender new-proposal-id))
 
@@ -195,9 +243,11 @@
                 proposal-id: new-proposal-id,
                 proposer: tx-sender,
                 title: title,
-                end-time: end-time
+                end-time: end-time,
+                deposit: PROPOSAL-DEPOSIT
             })
             (ok new-proposal-id)
+        )
         )
     )
 )
@@ -218,35 +268,52 @@
         (asserts! (< stacks-block-time (get end-time proposal)) ERR-VOTING-ENDED)
         (asserts! (is-none existing-vote) ERR-ALREADY-VOTED)
 
-        (map-set votes
-            { voter: tx-sender, proposal-id: proposal-id }
-            {
-                vote: vote-for,
-                timestamp: stacks-block-time                    ;; Clarity 4: Unix timestamp
-            }
-        )
+        ;; Get voter's token balance and lock tokens in escrow
+        (let
+            (
+                (voting-power (unwrap-panic (contract-call? .voting-token get-balance tx-sender)))
+            )
+            (asserts! (> voting-power u0) ERR-NOT-AUTHORIZED)
 
-        (map-set proposals
-            { proposal-id: proposal-id }
-            (merge proposal
+            ;; Lock tokens for this vote
+            (unwrap-panic (contract-call? .voting-token lock voting-power tx-sender))
+
+            ;; Track escrow
+            (map-set escrowed-tokens
+                { proposal-id: proposal-id, voter: tx-sender }
+                { amount: voting-power, locked-at: stacks-block-time }
+            )
+
+            (map-set votes
+                { voter: tx-sender, proposal-id: proposal-id }
                 {
-                    votes-for: (if vote-for (+ (get votes-for proposal) u1) (get votes-for proposal)),
-                    votes-against: (if (not vote-for) (+ (get votes-against proposal) u1) (get votes-against proposal))
+                    vote: vote-for,
+                    timestamp: stacks-block-time                    ;; Clarity 4: Unix timestamp
                 }
             )
+
+            (map-set proposals
+                { proposal-id: proposal-id }
+                (merge proposal
+                    {
+                        votes-for: (if vote-for (+ (get votes-for proposal) u1) (get votes-for proposal)),
+                        votes-against: (if (not vote-for) (+ (get votes-against proposal) u1) (get votes-against proposal))
+                    }
+                )
+            )
+
+            ;; Record vote in analytics contract
+            (unwrap-panic (contract-call? .voting-analytics record-vote tx-sender proposal-id))
+
+            (print {
+                event: "vote-cast",
+                proposal-id: proposal-id,
+                voter: tx-sender,
+                vote-for: vote-for,
+                timestamp: stacks-block-time
+            })
+            (ok true)
         )
-
-        ;; Record vote in analytics contract
-        (unwrap-panic (contract-call? .voting-analytics record-vote tx-sender proposal-id))
-
-        (print {
-            event: "vote-cast",
-            proposal-id: proposal-id,
-            voter: tx-sender,
-            vote-for: vote-for,
-            timestamp: stacks-block-time
-        })
-        (ok true)
     )
 )
 
@@ -282,6 +349,8 @@
                 votes-for: (get votes-for proposal),
                 votes-against: (get votes-against proposal)
             })
+
+            ;; Note: Escrowed tokens should be released by voters calling release-escrow
             (ok true)
         )
     )
@@ -318,6 +387,132 @@
         (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
         (asserts! (<= new-quorum-bps u10000) ERR-INVALID-PROPOSAL)
         (var-set min-quorum-bps new-quorum-bps)
+        (print {
+            event: "quorum-updated",
+            new-quorum: new-quorum-bps,
+            updated-by: tx-sender,
+            timestamp: stacks-block-time
+        })
+        (ok true)
+    )
+)
+
+;; Get minimum quorum
+(define-read-only (get-min-quorum)
+    (ok (var-get min-quorum-bps))
+)
+
+;; Release escrowed tokens after voting ends
+(define-public (release-escrow (proposal-id uint))
+    (let
+        (
+            (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
+            (escrow (unwrap! (map-get? escrowed-tokens { proposal-id: proposal-id, voter: tx-sender }) ERR-NOT-FOUND))
+        )
+        ;; Ensure voting has ended
+        (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
+
+        ;; Unlock tokens
+        (unwrap-panic (contract-call? .voting-token unlock (get amount escrow) tx-sender))
+
+        ;; Remove escrow record
+        (map-delete escrowed-tokens { proposal-id: proposal-id, voter: tx-sender })
+
+        (print {
+            event: "escrow-released",
+            proposal-id: proposal-id,
+            voter: tx-sender,
+            amount: (get amount escrow),
+            timestamp: stacks-block-time
+        })
+        (ok true)
+    )
+)
+
+;; Private helper: Release escrow for a single proposal (no reentrancy guard)
+(define-private (release-escrow-internal (proposal-id uint))
+    (let
+        (
+            (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
+            (escrow (unwrap! (map-get? escrowed-tokens { proposal-id: proposal-id, voter: tx-sender }) ERR-NOT-FOUND))
+        )
+        ;; Ensure voting has ended
+        (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
+
+        ;; Unlock tokens
+        (try! (contract-call? .voting-token unlock (get amount escrow) tx-sender))
+
+        ;; Remove escrow record
+        (map-delete escrowed-tokens { proposal-id: proposal-id, voter: tx-sender })
+
+        (print {
+            event: "escrow-released",
+            proposal-id: proposal-id,
+            voter: tx-sender,
+            amount: (get amount escrow),
+            timestamp: stacks-block-time
+        })
+        (ok (get amount escrow))
+    )
+)
+
+;; Batch release escrow for multiple proposals
+(define-public (batch-release-escrow (proposal-ids (list 10 uint)))
+    (let
+        (
+            (results (map release-escrow-internal proposal-ids))
+        )
+        (print {
+            event: "batch-escrow-released",
+            voter: tx-sender,
+            proposal-count: (len proposal-ids),
+            timestamp: stacks-block-time
+        })
+        (ok true)
+    )
+)
+
+;; Refund or burn proposal deposit after voting ends
+(define-public (process-proposal-deposit (proposal-id uint))
+    (let
+        (
+            (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NOT-FOUND))
+            (deposit (unwrap! (map-get? proposal-deposits { proposal-id: proposal-id }) ERR-NOT-FOUND))
+        )
+        ;; Ensure voting has ended
+        (asserts! (>= stacks-block-time (get end-time proposal)) ERR-VOTING-NOT-ENDED)
+        (asserts! (not (get refunded deposit)) ERR-ALREADY-EXECUTED)
+
+        (if (is-eq (get status proposal) "passed")
+            ;; Refund deposit if proposal passed
+            (begin
+                (unwrap-panic (contract-call? .voting-token unlock (get amount deposit) (get depositor deposit)))
+                (map-set proposal-deposits
+                    { proposal-id: proposal-id }
+                    (merge deposit { refunded: true })
+                )
+                (print {
+                    event: "deposit-refunded",
+                    proposal-id: proposal-id,
+                    depositor: (get depositor deposit),
+                    amount: (get amount deposit)
+                })
+            )
+            ;; Burn deposit if proposal rejected
+            (begin
+                (unwrap-panic (contract-call? .voting-token burn (get amount deposit) (get depositor deposit)))
+                (map-set proposal-deposits
+                    { proposal-id: proposal-id }
+                    (merge deposit { refunded: true })
+                )
+                (print {
+                    event: "deposit-burned",
+                    proposal-id: proposal-id,
+                    depositor: (get depositor deposit),
+                    amount: (get amount deposit)
+                })
+            )
+        )
         (ok true)
     )
 )

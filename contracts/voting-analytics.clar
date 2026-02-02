@@ -113,6 +113,38 @@
     )
 )
 
+;; Get voter reputation score
+(define-read-only (get-reputation-score (voter principal))
+    (match (map-get? voter-stats { voter: voter })
+        stats (ok (get reputation-score stats))
+        (ok u0)
+    )
+)
+
+;; Check if voter is active
+(define-read-only (is-active-voter (voter principal))
+    (match (map-get? voter-stats { voter: voter })
+        stats (ok (> (get total-votes-cast stats) u0))
+        (ok false)
+    )
+)
+
+;; Get voter's last activity time
+(define-read-only (get-last-activity (voter principal))
+    (match (map-get? voter-stats { voter: voter })
+        stats (ok (get last-vote stats))
+        (ok u0)
+    )
+)
+
+;; Check if voter voted recently (within 30 days)
+(define-read-only (is-recent-voter (voter principal))
+    (match (map-get? voter-stats { voter: voter })
+        stats (ok (>= (get last-vote stats) (- stacks-block-time u2592000)))
+        (ok false)
+    )
+)
+
 ;; Public functions
 
 ;; Record vote (should be called by voting contract)
